@@ -22,6 +22,10 @@ class FileNotOnPhone(Exception):
     pass
 
 
+class FolderNotOnPhone(FileNotOnPhone):
+    pass
+
+
 @dataclass
 class PhoneVideo:
     name: str
@@ -111,7 +115,7 @@ class MtpPhoneSource:
         for path in folders:
             folder = self._resolve(path)
             if folder is None:
-                continue
+                raise FolderNotOnPhone(path)
             col = self._duration_col(folder)
             for it in folder.Items():
                 if it.IsFolder or not VIDEO_EXT.search(it.Name):
@@ -121,6 +125,7 @@ class MtpPhoneSource:
         return out
 
     def copy(self, name: str, dest_dir: str) -> str:
+        """Copy `name` from the constructor `folders` (the Protocol has no folder arg)."""
         item = None
         for path in self.folders:
             folder = self._resolve(path)
@@ -136,11 +141,20 @@ class MtpPhoneSource:
             raise FileNotOnPhone(name)
         os.makedirs(dest_dir, exist_ok=True)
         dest = os.path.join(dest_dir, name)
+        # Remove stale content so the poll cannot return on an old file.
+        if os.path.exists(dest):
+            os.remove(dest)
+        # MTP CopyHere is asynchronous: the file appears and grows while copying,
+        # so wait until its size is stable across two consecutive checks.
         self._get_shell().NameSpace(os.path.abspath(dest_dir)).CopyHere(item, 20)
         deadline = time.monotonic() + self.copy_timeout_s
+        last_size = -1
         while time.monotonic() < deadline:
             if os.path.exists(dest):
-                return dest
+                size = os.path.getsize(dest)
+                if size > 0 and size == last_size:
+                    return dest
+                last_size = size
             time.sleep(0.5)
         raise TimeoutError(f"Copy of {name!r} did not appear in {dest_dir!r} within {self.copy_timeout_s}s")
 
@@ -152,11 +166,12 @@ class FakePhoneSource:
         self.catalog = catalog
 
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]:
-        return [
-            PhoneVideo(name, None, folder)
-            for folder in folders
-            for name, _ in self.catalog.get(folder, [])
-        ]
+        out: list[PhoneVideo] = []
+        for folder in folders:
+            if folder not in self.catalog:
+                raise FolderNotOnPhone(folder)
+            out.extend(PhoneVideo(name, None, folder) for name, _ in self.catalog[folder])
+        return out
 
     def copy(self, name: str, dest_dir: str) -> str:
         for entries in self.catalog.values():

@@ -20,3 +20,30 @@ def test_ingest_originals_with_fake_probe(tmp_path):
     assert len(res) == 2
     assert all(o.phashes == [] and o.duration == 15.5 for o in res)
     assert all((dest / o.path.split("\\")[-1].split("/")[-1]).exists() for o in res)
+
+
+def test_missing_folder_raises(tmp_path):
+    from insta2youtube.ingest import FolderNotOnPhone
+
+    fake = FakePhoneSource({"Movies/Edits": []})
+    with pytest.raises(FolderNotOnPhone):
+        fake.list_videos(["Movies/Typo"])
+
+
+def test_parse_duration():
+    from insta2youtube.ingest import _parse_duration
+
+    assert _parse_duration("") is None
+    assert _parse_duration("00:00:15") == 15.0
+    assert _parse_duration("1:02") == 62.0
+    assert _parse_duration("abc") is None
+
+
+def test_ingest_propagates_copy_failure(tmp_path):
+    class Broken(FakePhoneSource):
+        def copy(self, name, dest_dir):
+            raise FileNotOnPhone(name)
+
+    src = Broken({"F": [("a.mp4", tmp_path / "a.mp4")]})
+    with pytest.raises(FileNotOnPhone):
+        ingest_originals(src, ["F"], str(tmp_path / "o"), probe=lambda p: 1.0)
