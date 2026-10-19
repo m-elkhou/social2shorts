@@ -67,6 +67,8 @@ def run_backlog(
     limit: int,
     privacy: str = "unlisted",
 ) -> RunReport:
+    os.makedirs(settings.work_dir, exist_ok=True)
+    os.makedirs(settings.originals_dir, exist_ok=True)
     store = Store(settings.db_path)
     store.init_schema()
     report = RunReport()
@@ -86,16 +88,17 @@ def run_backlog(
             if len(report.uploaded) >= limit:
                 break
             sid = entry.source_id
-            fp = store.fingerprint(entry)
-            if store.is_uploaded(fp):
-                report.skipped.append(sid)
-                continue
-            if audio_gate.classify(entry) == "licensed":
-                store.add_review(sid, "licensed music")
-                store.set_status(sid, ItemStatus.review_audio)
-                report.review.append(sid)
-                continue
+            vid = None
             try:
+                fp = store.fingerprint(entry)
+                if store.is_uploaded(fp):
+                    report.skipped.append(sid)
+                    continue
+                if audio_gate.classify(entry) == "licensed":
+                    store.add_review(sid, "licensed music")
+                    store.set_status(sid, ItemStatus.review_audio)
+                    report.review.append(sid)
+                    continue
                 ref = deps.download_reference(entry.url, settings.work_dir)
                 ref_ph = deps.phash_file(ref, settings.phash_frames)
                 m = match.match_one(entry, originals, ref_ph,
@@ -124,7 +127,13 @@ def run_backlog(
             except youtube_upload.AuthRefreshError:
                 raise
             except Exception as exc:  # one bad video must not abort the batch
-                store.add_review(sid, f"processing error: {type(exc).__name__}")
+                reason = f"processing error: {type(exc).__name__}: {exc}"
+                if vid:
+                    reason += f" (uploaded as {vid}; not in ledger)"
+                try:
+                    store.add_review(sid, reason)
+                except Exception:
+                    pass
                 report.review.append(sid)
     except youtube_upload.AuthRefreshError:
         report.alert = AUTH_ALERT

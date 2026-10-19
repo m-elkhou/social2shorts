@@ -43,23 +43,82 @@ def test_backlog_routes_and_is_idempotent(tmp_path):
     assert len(r2.uploaded) == 0 and r2.skipped == ["A"]
 
 
+def _multi(n_match):
+    """Entries A1..An all match an original each; A1 has most views (processed first)."""
+    ents, origs = [], []
+    for k in range(n_match):
+        sid = f"M{k}"
+        ents.append(_e(sid, 20.0 + 3 * k).model_copy(update={"view_count": 100000 - k}))
+        origs.append(Original(path=f"/orig/{sid}.mp4", duration=20.0 + 3 * k))
+    return ents, origs
+
+
+def _deps_multi(ents, origs, upload):
+    d = _deps(upload=upload)
+    d.discover = lambda: list(ents)
+    d.ingest = lambda s, f, dd: list(origs)
+    # distinct deterministic hashes per id; refs and originals share the id
+    d.phash_file = lambda p, n: [{"M0": "00000000", "M1": "ffffffff", "M2": "ffff0000"}.get(
+        p.rsplit("/", 1)[-1].split(".")[0], "0f0f0f0f")]
+    return d
+
+
+def test_limit_caps_uploads(tmp_path):
+    ents, origs = _multi(3)
+    calls = []
+    d = _deps_multi(ents, origs, lambda v, m, p: calls.append(v) or "id")
+    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), d, limit=1)
+    assert len(r.uploaded) == 1 and len(calls) == 1
+    assert r.pending == [] and r.review == [] and r.skipped == []
+
+
 def test_auth_refresh_error_stops_run(tmp_path):
+    ents, origs = _multi(3)
+
     def boom(v, m, p):
         raise AuthRefreshError("x")
 
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), _deps(upload=boom), limit=10)
+    d = _deps_multi(ents, origs, boom)
+    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), d, limit=10)
     assert r.alert and not r.uploaded
+    assert r.review == [] and r.pending == [] and r.skipped == []
 
 
-def test_empty_title_replaced_and_item_errors_isolated(tmp_path):
+def test_empty_title_replaced(tmp_path):
     seen = []
     r = run_backlog(_settings(tmp_path), FakePhoneSource({}),
                     _deps(title="  ", upload=lambda v, m, p: seen.append(m.title) or "id"), limit=10)
     assert seen == ["cap A"] and len(r.uploaded) == 1
 
+
+def test_item_error_isolated_and_loop_continues(tmp_path):
+    # order by views: A (1000 views) ... all equal views -> stable order A, B, C
     d = _deps()
-    d.transcribe = lambda p: 1 / 0
-    sub = tmp_path / "second"
-    sub.mkdir()
-    r = run_backlog(_settings(sub), FakePhoneSource({}), d, limit=10)
-    assert not r.uploaded and len(r.review) == 2
+
+    def flaky(p):
+        raise ZeroDivisionError("boom")
+
+    d.transcribe = flaky
+    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), d, limit=10)
+    assert not r.uploaded and r.alert is None
+    assert "A" in r.review and "B" in r.review      # A failed, B licensed
+    assert r.pending == ["C"]                       # later entry still processed
+    from insta2youtube.db import Store
+    reasons = [x["reason"] for x in Store(str(tmp_path / "db.sqlite")).reviews()]
+    assert any(x.startswith("processing error: ZeroDivisionError: boom") for x in reasons)
+
+
+def test_db_error_on_one_entry_does_not_abort(tmp_path, monkeypatch):
+    from insta2youtube.db import Store
+    orig = Store.is_uploaded
+    monkeypatch.setattr(Store, "is_uploaded",
+                        lambda self, fp: (_ for _ in ()).throw(RuntimeError("db")) if self._n(fp) else orig(self, fp))
+    calls = {"n": 0}
+
+    def _n(self, fp):
+        calls["n"] += 1
+        return calls["n"] == 1
+
+    monkeypatch.setattr(Store, "_n", _n, raising=False)
+    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), _deps(), limit=10)
+    assert len(r.review) >= 1 and r.alert is None
