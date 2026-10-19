@@ -134,3 +134,13 @@ class Store:
     def fingerprint(self, entry: CatalogEntry) -> str:
         key = f"{normalize_caption(entry.caption)}|{round(entry.duration)}"
         return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+
+    def status_counts(self) -> dict[str, int]:
+        with self._conn() as c:
+            rows = c.execute("SELECT status, COUNT(*) AS n FROM catalog GROUP BY status").fetchall()
+        return {r["status"]: r["n"] for r in rows}
+
+    def ledger(self) -> list[dict]:
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM ledger ORDER BY created, source_id").fetchall()
+        return [dict(r) for r in rows]
