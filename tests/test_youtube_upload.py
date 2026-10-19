@@ -1,3 +1,6 @@
+import os
+import stat
+import sys
 import json
 
 import pytest
@@ -102,3 +105,45 @@ def test_first_auth_writes_token_file(monkeypatch, tmp_path):
     creds = get_credentials("cs.json", str(tok))
     assert isinstance(creds, FakeCreds)
     assert json.loads(tok.read_text())["refresh_token"] == "r"
+
+
+def test_no_refresh_token_raises(tmp_path):
+    tok = tmp_path / "token.json"
+    tok.write_text(json.dumps({
+        "token": "old", "refresh_token": None, "client_id": "c",
+        "client_secret": "s", "token_uri": "https://oauth2.googleapis.com/token",
+        "scopes": yu.SCOPES, "expiry": "2000-01-01T00:00:00Z",
+    }))
+    with pytest.raises(AuthRefreshError):
+        get_credentials("nope.json", str(tok))
+
+
+@pytest.mark.parametrize("content", ["{not json", '{"token": "x"}'])
+def test_corrupt_or_incomplete_token_raises(tmp_path, content):
+    tok = tmp_path / "token.json"
+    tok.write_text(content)
+    with pytest.raises(AuthRefreshError):
+        get_credentials("nope.json", str(tok))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes only")
+def test_token_file_mode_0600(monkeypatch, tmp_path):
+    class FakeCreds:
+        def to_json(self):
+            return "{}"
+
+    class FakeFlow:
+        def run_local_server(self, port=0):
+            return FakeCreds()
+
+    monkeypatch.setattr(
+        yu.InstalledAppFlow, "from_client_secrets_file",
+        classmethod(lambda cls, *a, **k: FakeFlow()),
+    )
+    tok = tmp_path / "secrets" / "token.json"
+    get_credentials("cs.json", str(tok))
+    assert stat.S_IMODE(os.stat(tok).st_mode) == 0o600
+    yu._save(FakeCreds(), str(tok))
+    tok.chmod(0o644)
+    yu._save(FakeCreds(), str(tok))
+    assert stat.S_IMODE(os.stat(tok).st_mode) == 0o600

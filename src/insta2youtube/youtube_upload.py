@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Any
 
 from google.auth.transport.requests import Request
@@ -25,7 +26,10 @@ class AuthRefreshError(Exception):
 def get_credentials(client_secrets: str, token_path: str) -> Credentials:
     creds = None
     if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+        except Exception as exc:  # corrupt JSON, missing fields, unreadable
+            raise AuthRefreshError(f"stored token unusable: {exc}") from exc
     if creds is not None and creds.valid:
         return creds
     if creds is not None and creds.refresh_token:
@@ -55,7 +59,7 @@ def _save(creds: Credentials, token_path: str) -> None:
     try:
         os.chmod(token_path, 0o600)  # tighten an already-existing looser file
     except OSError:
-        pass
+        warnings.warn(f"could not tighten permissions on {token_path}")
 
 
 def build_service(client_secrets: str = "secrets/client_secret.json",
