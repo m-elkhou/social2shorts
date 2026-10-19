@@ -41,6 +41,38 @@ def test_run_invokes_pipeline(monkeypatch, tmp_path):
     assert result.exit_code == 0 and called["args"][3] == 3 and called["args"][4] == "unlisted"
 
 
+def _patch_run(monkeypatch):
+    called = {}
+
+    def fake(*a, **k):
+        called["args"] = a
+        return RunReport()
+
+    monkeypatch.setattr(cli, "run_backlog", fake)
+    monkeypatch.setattr(PipelineDeps, "default", classmethod(lambda cls, s: object()))
+    monkeypatch.setattr(cli, "MtpPhoneSource", lambda *a, **k: object())
+    return called
+
+
+def test_run_rejects_invalid_privacy(monkeypatch, tmp_path):
+    cfg, _ = _cfg(tmp_path)
+    called = _patch_run(monkeypatch)
+    result = runner.invoke(app, ["run", "--privacy", "bogus", "-c", cfg])
+    assert result.exit_code != 0 and "args" not in called
+
+
+def test_run_uses_config_default_privacy(monkeypatch, tmp_path):
+    cfg, _ = _cfg(tmp_path)
+    with open(cfg, "a") as f:
+        f.write('default_privacy = "private"\n')
+    called = _patch_run(monkeypatch)
+    assert runner.invoke(app, ["run", "-c", cfg]).exit_code == 0
+    assert called["args"][4] == "private"
+    called.clear()
+    assert runner.invoke(app, ["run", "--privacy", "public", "-c", cfg]).exit_code == 0
+    assert called["args"][4] == "public"
+
+
 def test_status_and_review(tmp_path):
     cfg, store = _cfg(tmp_path)
     store.init_schema()

@@ -101,14 +101,18 @@ def ingest(limit: Optional[int] = typer.Option(None, "--limit"), config: str = C
 @app.command()
 def run(
     limit: int = typer.Option(3, "--limit"),
-    privacy: str = typer.Option("unlisted", "--privacy"),
+    privacy: Optional[Privacy] = typer.Option(
+        None, "--privacy", help="Default: default_privacy from config."
+    ),
     config: str = ConfigOpt,
 ) -> None:
     """Run the backlog pipeline end to end."""
     settings = load_config(config)
     phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
     deps = PipelineDeps.default(settings)
-    report = run_backlog(settings, phone, deps, limit, privacy)
+    report = run_backlog(
+        settings, phone, deps, limit, privacy.value if privacy else settings.default_privacy
+    )
     table = Table(title="Run report")
     table.add_column("bucket")
     table.add_column("count")

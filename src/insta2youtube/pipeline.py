@@ -119,7 +119,14 @@ def run_backlog(
                 if not meta.title.strip():
                     meta = meta.model_copy(update={"title": _fallback_title(entry.caption)})
                 ass = enrich.build_ass(segs) if segs else None
-                out = deps.transcode(m.original_path, os.path.join(settings.work_dir, f"{sid}.mp4"), ass)
+                try:
+                    out = deps.transcode(m.original_path, os.path.join(settings.work_dir, f"{sid}.mp4"), ass)
+                finally:
+                    if ass:
+                        try:
+                            os.unlink(ass)
+                        except OSError:
+                            pass
                 vid = deps.upload(out, meta, privacy)
                 store.mark_uploaded(fp, sid, vid)
                 store.set_status(sid, ItemStatus.uploaded)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     phone_name_match: str = ""
     phone_video_folders: list[str] = []
     gemini_model: str = ""
-    default_privacy: str = "unlisted"
+    default_privacy: Literal["public", "unlisted", "private"] = "unlisted"
 
 
 def load_config(path: str) -> Settings:

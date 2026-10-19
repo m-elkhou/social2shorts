@@ -1,3 +1,4 @@
+from insta2youtube.enrich import Segment
 from insta2youtube.config import Settings
 from insta2youtube.ingest import FakePhoneSource
 from insta2youtube.models import CatalogEntry, Original, Platform, ShortMeta
@@ -122,3 +123,19 @@ def test_db_error_on_one_entry_does_not_abort(tmp_path, monkeypatch):
     monkeypatch.setattr(Store, "_n", _n, raising=False)
     r = run_backlog(_settings(tmp_path), FakePhoneSource({}), _deps(), limit=10)
     assert len(r.review) >= 1 and r.alert is None
+
+
+def test_ass_file_removed_after_transcode(tmp_path):
+    import dataclasses
+    import os
+    seen = []
+
+    def tc(src, dst, ass):
+        seen.append((ass, ass is not None and os.path.exists(ass)))
+        return dst
+
+    deps = dataclasses.replace(_deps(), transcribe=lambda p: [Segment(0.0, 1.0, "hi")], transcode=tc)
+    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), deps, limit=10)
+    assert len(r.uploaded) == 1
+    ass, existed = seen[0]
+    assert ass and existed and not os.path.exists(ass)
