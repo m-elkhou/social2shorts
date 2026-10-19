@@ -1,0 +1,8 @@
+secrets/
+tokens/
+*.sqlite
+originals/
+work/
+.venv/
+__pycache__/
+*.pyc
