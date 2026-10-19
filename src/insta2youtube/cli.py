@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Optional
 
 import typer
@@ -20,6 +21,26 @@ console = Console()
 
 CLIENT_SECRETS = "secrets/client_secret.json"
 TOKEN_PATH = "secrets/token.json"
+
+class Privacy(str, Enum):
+    public = "public"
+    unlisted = "unlisted"
+    private = "private"
+
+
+class _LimitedPhone:
+    """Wraps a PhoneSource so only the first N videos are listed (and copied)."""
+
+    def __init__(self, inner, limit: int):
+        self.inner = inner
+        self.limit = limit
+
+    def list_videos(self, folders):
+        return self.inner.list_videos(folders)[: self.limit]
+
+    def copy(self, name, dest_dir):
+        return self.inner.copy(name, dest_dir)
+
 
 ConfigOpt = typer.Option("config.toml", "-c", "--config", help="Path to config TOML.")
 
@@ -66,9 +87,9 @@ def ingest(limit: Optional[int] = typer.Option(None, "--limit"), config: str = C
     """Copy originals off the phone into originals_dir."""
     settings = load_config(config)
     phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
+    if limit is not None:
+        phone = _LimitedPhone(phone, max(limit, 0))
     originals = ingest_originals(phone, settings.phone_video_folders, settings.originals_dir)
-    if limit:
-        originals = originals[:limit]
     table = Table(title=f"Ingested ({len(originals)})")
     table.add_column("path")
     table.add_column("duration")
@@ -109,7 +130,12 @@ def review(
     """List the review queue; optionally approve an item."""
     store = _store(load_config(config))
     if approve:
+        known = {e.source_id for e in store.all_catalog()} | {r["source_id"] for r in store.reviews()}
+        if approve not in known:
+            console.print(f"[red]Unknown source_id: {approve}[/red]")
+            raise typer.Exit(1)
         store.set_status(approve, ItemStatus.ready)
+        store.resolve_review(approve)
         console.print(f"[green]{approve} approved -> ready.[/green]")
         return
     rows = store.reviews()
@@ -124,7 +150,7 @@ def review(
 @app.command()
 def publish(
     target: str = typer.Argument(..., help="source_id or the word all"),
-    privacy: str = typer.Option("public", "--privacy"),
+    privacy: Privacy = typer.Option(Privacy.public, "--privacy"),
     config: str = ConfigOpt,
 ) -> None:
     """Flip uploaded video(s) to the given privacy."""
@@ -135,9 +161,18 @@ def publish(
     if not rows:
         console.print(f"[red]No uploaded video found for {target}.[/red]")
         raise typer.Exit(1)
+    ok, failed = [], []
     for r in rows:
-        youtube_upload.set_privacy(r["youtube_id"], privacy)
-        console.print(f"{r['source_id']} ({r['youtube_id']}) -> {privacy}")
+        try:
+            youtube_upload.set_privacy(r["youtube_id"], privacy.value)
+            ok.append(r["source_id"])
+            console.print(f"{r['source_id']} ({r['youtube_id']}) -> {privacy.value}")
+        except Exception as exc:
+            failed.append(r["source_id"])
+            console.print(f"[red]{r['source_id']} failed: {type(exc).__name__}: {exc}[/red]")
+    console.print(f"Succeeded: {len(ok)}, failed: {len(failed)}")
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command()

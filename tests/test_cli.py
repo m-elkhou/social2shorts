@@ -65,3 +65,72 @@ def test_publish_calls_set_privacy(monkeypatch, tmp_path):
     assert r.exit_code == 0 and calls == [("yt1", "public")]
     r = runner.invoke(app, ["publish", "nope", "-c", cfg])
     assert r.exit_code == 1
+
+
+def test_publish_rejects_invalid_privacy(monkeypatch, tmp_path):
+    cfg, store = _cfg(tmp_path)
+    store.init_schema()
+    store.mark_uploaded("fp", "A", "yt1")
+    calls = []
+    monkeypatch.setattr(cli.youtube_upload, "set_privacy", lambda v, p: calls.append((v, p)))
+    r = runner.invoke(app, ["publish", "A", "--privacy", "publc", "-c", cfg])
+    assert r.exit_code != 0 and calls == []
+
+
+def test_publish_all_continues_after_failure(monkeypatch, tmp_path):
+    cfg, store = _cfg(tmp_path)
+    store.init_schema()
+    store.mark_uploaded("f1", "A", "yt1")
+    store.mark_uploaded("f2", "B", "yt2")
+    calls = []
+
+    def fake(v, p):
+        calls.append(v)
+        if v == "yt1":
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli.youtube_upload, "set_privacy", fake)
+    r = runner.invoke(app, ["publish", "all", "-c", cfg])
+    assert calls == ["yt1", "yt2"] and r.exit_code == 1 and "Succeeded: 1, failed: 1" in r.output
+
+
+def test_review_approve_unknown_exits_1(tmp_path):
+    cfg, store = _cfg(tmp_path)
+    store.init_schema()
+    r = runner.invoke(app, ["review", "--approve", "nope", "-c", cfg])
+    assert r.exit_code == 1
+
+
+def test_review_approve_removes_row(tmp_path):
+    cfg, store = _cfg(tmp_path)
+    store.init_schema()
+    store.upsert_catalog(_entry("A"))
+    store.add_review("A", "x")
+    r = runner.invoke(app, ["review", "--approve", "A", "-c", cfg])
+    assert r.exit_code == 0 and store.reviews() == []
+
+
+def test_ingest_limit_bounds_copy(monkeypatch, tmp_path):
+    from insta2youtube.ingest import FakePhoneSource, PhoneVideo
+    cfg, _ = _cfg(tmp_path)
+    copied = []
+
+    class P:
+        def list_videos(self, folders):
+            return [PhoneVideo.__new__(PhoneVideo) for _ in range(3)]
+
+        def copy(self, name, dest):
+            copied.append(name)
+            return name
+
+    seen = {}
+
+    def fake_ingest(phone, folders, dest):
+        seen["n"] = len(phone.list_videos(folders))
+        return []
+
+    monkeypatch.setattr(cli, "MtpPhoneSource", lambda *a, **k: P())
+    monkeypatch.setattr(cli, "ingest_originals", fake_ingest)
+    for lim, n in (("2", 2), ("0", 0)):
+        r = runner.invoke(app, ["ingest", "--limit", lim, "-c", cfg])
+        assert r.exit_code == 0 and seen["n"] == n

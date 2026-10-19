@@ -119,6 +119,10 @@ class Store:
             rows = c.execute("SELECT * FROM review_queue ORDER BY id").fetchall()
         return [dict(r) for r in rows]
 
+    def resolve_review(self, source_id: str) -> None:
+        with self._conn() as c:
+            c.execute("DELETE FROM review_queue WHERE source_id=?", (source_id,))
+
     def mark_uploaded(self, fingerprint: str, source_id: str, youtube_id: str) -> None:
         with self._conn() as c:
             c.execute(
