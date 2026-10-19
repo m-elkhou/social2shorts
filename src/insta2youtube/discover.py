@@ -41,18 +41,18 @@ def parse_entry(info: dict) -> CatalogEntry:
     )
 
 
+def build_opts(opts: dict | None = None) -> dict[str, Any]:
+    """Default yt-dlp options (no impersonation: the profile works without it)."""
+    o: dict[str, Any] = {"quiet": True, "no_warnings": True, "ignoreerrors": True}
+    o.update(opts or {})
+    return o
+
+
 def run_ytdlp(url: str, opts: dict | None = None, download: bool = False) -> list[dict]:
     """Run yt-dlp as a library; return info dicts (playlist entries, or [info])."""
     import yt_dlp
 
-    o: dict[str, Any] = {"quiet": True, "no_warnings": True, "ignoreerrors": True}
-    o.update(opts or {})
-    try:
-        o.setdefault("impersonate", yt_dlp.networking.impersonate.ImpersonateTarget())
-        ydl_ctx = yt_dlp.YoutubeDL(o)
-    except Exception:
-        o.pop("impersonate", None)
-        ydl_ctx = yt_dlp.YoutubeDL(o)
+    ydl_ctx = yt_dlp.YoutubeDL(build_opts(opts))
     with ydl_ctx as ydl:
         info = ydl.extract_info(url, download=download)
     if not info:

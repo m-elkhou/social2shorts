@@ -46,3 +46,32 @@ def test_download_reference_returns_path(tmp_path):
 
     assert download_reference("u", tmp_path / "refs", ytdlp=fake) == str(tmp_path / "9.mp4")
     assert (tmp_path / "refs").is_dir()
+
+
+def test_build_opts_defaults_and_ytdlp_constructs():
+    import yt_dlp
+
+    from insta2youtube.discover import build_opts
+
+    o = build_opts({"playlistend": 3})
+    assert "impersonate" not in o and o["playlistend"] == 3 and o["ignoreerrors"]
+    yt_dlp.YoutubeDL(o).close()  # builds without raising, no curl_cffi needed
+
+
+@pytest.mark.parametrize("empty", [[], None])
+def test_download_reference_empty_raises(tmp_path, empty):
+    with pytest.raises(DiscoveryError):
+        download_reference("u", tmp_path, ytdlp=lambda *a, **k: empty)
+
+
+def test_download_reference_fallback_path_and_format(tmp_path):
+    seen = {}
+
+    def fake(url, opts=None, download=False):
+        seen["opts"] = opts
+        return [{"id": "42", "ext": "mp4"}]
+
+    got = download_reference("u", tmp_path / "refs", ytdlp=fake)
+    assert got == str(tmp_path / "refs" / "42.mp4")
+    assert seen["opts"]["format"].split("/")[0] == "h264_540p*"
+    assert seen["opts"]["outtmpl"].startswith(str(tmp_path / "refs"))
