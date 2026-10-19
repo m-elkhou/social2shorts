@@ -6,7 +6,7 @@ import subprocess
 def _escape_filter_path(path: str) -> str:
     """Escape a path for use inside an ffmpeg filter option value."""
     p = path.replace("\\", "/")
-    p = p.replace(":", "\:").replace("'", "\'")
+    p = p.replace(":", r"\:").replace("'", r"\'")
     return p
 
 
