@@ -83,3 +83,22 @@ def test_set_privacy_updates_status():
     assert kind == "update" and kw["part"] == "status"
     assert kw["body"]["id"] == "VID123"
     assert kw["body"]["status"]["privacyStatus"] == "public"
+
+
+def test_first_auth_writes_token_file(monkeypatch, tmp_path):
+    class FakeCreds:
+        def to_json(self):
+            return '{"refresh_token": "r"}'
+
+    class FakeFlow:
+        def run_local_server(self, port=0):
+            return FakeCreds()
+
+    monkeypatch.setattr(
+        yu.InstalledAppFlow, "from_client_secrets_file",
+        classmethod(lambda cls, *a, **k: FakeFlow()),
+    )
+    tok = tmp_path / "secrets" / "token.json"
+    creds = get_credentials("cs.json", str(tok))
+    assert isinstance(creds, FakeCreds)
+    assert json.loads(tok.read_text())["refresh_token"] == "r"

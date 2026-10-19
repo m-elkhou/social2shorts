@@ -44,9 +44,18 @@ def get_credentials(client_secrets: str, token_path: str) -> Credentials:
 
 
 def _save(creds: Credentials, token_path: str) -> None:
-    os.makedirs(os.path.dirname(os.path.abspath(token_path)), exist_ok=True)
-    with open(token_path, "w", encoding="utf-8") as f:
+    # Token holds the refresh token (a secret): owner-only perms.
+    # On Windows 0o600 is best-effort (POSIX mode maps to the read-only
+    # attribute, not full ACLs); correct on POSIX, harmless on Windows.
+    d = os.path.dirname(os.path.abspath(token_path))
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
+    try:
+        os.chmod(token_path, 0o600)  # tighten an already-existing looser file
+    except OSError:
+        pass
 
 
 def build_service(client_secrets: str = "secrets/client_secret.json",
