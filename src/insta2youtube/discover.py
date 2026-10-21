@@ -19,14 +19,14 @@ def _int(v: Any) -> int:
         return 0
 
 
-def parse_entry(info: dict) -> CatalogEntry:
-    """Map a yt-dlp TikTok info dict to a CatalogEntry (pure)."""
+def parse_entry(info: dict, platform: str = "tiktok") -> CatalogEntry:
+    """Map a yt-dlp info dict to a CatalogEntry (pure)."""
     try:
         duration = float(info.get("duration") or 0.0)
     except (TypeError, ValueError):
         duration = 0.0
     return CatalogEntry(
-        platform="tiktok",
+        platform=platform,
         source_id=str(info["id"]),
         url=info.get("webpage_url") or info.get("url") or "",
         caption=info.get("description") or info.get("title") or "",
@@ -68,6 +68,19 @@ def discover_tiktok(profile_url: str, limit: int | None, ytdlp: Ytdlp = run_ytdl
         opts["playlistend"] = limit
     infos = ytdlp(profile_url, opts)
     entries = [parse_entry(i) for i in infos if i and i.get("id")]
+    if not entries:
+        raise DiscoveryError(f"no entries returned for {profile_url}")
+    return entries
+
+
+def discover_instagram(profile_url: str, cookies: str | None, limit: int | None, ytdlp: Ytdlp = run_ytdlp) -> list[CatalogEntry]:
+    opts: dict[str, Any] = {}
+    if limit:
+        opts["playlistend"] = limit
+    if cookies:
+        opts["cookiefile"] = cookies
+    infos = ytdlp(profile_url, opts)
+    entries = [parse_entry(i, platform="instagram") for i in infos if i and i.get("id")]
     if not entries:
         raise DiscoveryError(f"no entries returned for {profile_url}")
     return entries
