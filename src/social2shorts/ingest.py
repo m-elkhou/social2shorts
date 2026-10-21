@@ -15,32 +15,51 @@ DURATION_HEADER = re.compile(r"Longueur|Length|Durée|Duration", re.IGNORECASE)
 
 
 class PhoneNotFound(Exception):
+    """Raised when the specified phone device is not found on the system."""
     pass
 
 
 class FileNotOnPhone(Exception):
+    """Raised when a requested file is not found on the phone."""
     pass
 
 
 class FolderNotOnPhone(FileNotOnPhone):
+    """Raised when a requested folder is not found on the phone."""
     pass
 
 
 @dataclass
 class PhoneVideo:
+    """Represents a video file found on a phone.
+
+    Attributes:
+        name: Name of the video file.
+        duration_s: Duration of the video in seconds, if available.
+        folder: Path to the folder containing the video on the phone.
+    """
     name: str
     duration_s: float | None
     folder: str
 
 
 class PhoneSource(Protocol):
+    """Protocol for a source that can list and copy videos from a phone."""
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]: ...
 
     def copy(self, name: str, dest_dir: str) -> str: ...
 
 
 def _parse_duration(text: str) -> float | None:
-    text = (text or "").strip().replace("\u200e", "").replace("\u200f", "")
+    """Parse a duration string (H:MM:SS) into total seconds.
+
+    Args:
+        text: The duration string to parse.
+
+    Returns:
+        The duration in seconds, or None if parsing fails.
+    """
+    text = (text or "").strip().replace("‎", "").replace("‏", "")
     if not text:
         return None
     try:
@@ -61,12 +80,24 @@ class MtpPhoneSource:
         folders: list[str] | None = None,
         copy_timeout_s: float = 120.0,
     ):
+        """Initialize the MTP phone source.
+
+        Args:
+            phone_name_match: Substring to match the phone's name in 'This PC'.
+            folders: List of folders on the phone to monitor.
+            copy_timeout_s: Timeout for the asynchronous MTP copy process.
+        """
         self.phone_name_match = phone_name_match
         self.folders = list(folders or [])
         self.copy_timeout_s = copy_timeout_s
         self._shell = None
 
     def _get_shell(self):
+        """Lazy-load the Shell.Application COM object.
+
+        Returns:
+            The Shell.Application instance.
+        """
         if self._shell is None:
             import win32com.client
 
@@ -74,6 +105,14 @@ class MtpPhoneSource:
         return self._shell
 
     def _device_folder(self):
+        """Find the root folder of the device matching phone_name_match.
+
+        Returns:
+            The shell Folder object for the device.
+
+        Raises:
+            PhoneNotFound: If no device matching the name is found.
+        """
         this_pc = self._get_shell().NameSpace(0x11)
         needle = self.phone_name_match.lower()
         for item in this_pc.Items():
@@ -82,7 +121,14 @@ class MtpPhoneSource:
         raise PhoneNotFound(f"No device matching {self.phone_name_match!r}")
 
     def _resolve(self, path: str):
-        """Return the shell Folder for `path`, searching each storage in order."""
+        """Return the shell Folder for `path`, searching each storage in order.
+
+        Args:
+            path: The relative path on the device.
+
+        Returns:
+            The shell Folder object if found, otherwise None.
+        """
         parts = [p for p in path.replace("\\", "/").split("/") if p]
         for storage in self._device_folder().Items():
             if not storage.IsFolder:
@@ -104,6 +150,14 @@ class MtpPhoneSource:
 
     @staticmethod
     def _duration_col(folder) -> int | None:
+        """Find the index of the duration column in the folder's details.
+
+        Args:
+            folder: The shell Folder object.
+
+        Returns:
+            The column index if found, otherwise None.
+        """
         for c in range(321):
             header = folder.GetDetailsOf(None, c)
             if header and DURATION_HEADER.search(header):
@@ -111,6 +165,17 @@ class MtpPhoneSource:
         return None
 
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]:
+        """List all videos in the specified folders on the phone.
+
+        Args:
+            folders: List of folder paths to scan.
+
+        Returns:
+            A list of PhoneVideo objects.
+
+        Raises:
+            FolderNotOnPhone: If one of the specified folders cannot be resolved.
+        """
         out: list[PhoneVideo] = []
         for path in folders:
             folder = self._resolve(path)
@@ -125,7 +190,19 @@ class MtpPhoneSource:
         return out
 
     def copy(self, name: str, dest_dir: str) -> str:
-        """Copy `name` from the constructor `folders` (the Protocol has no folder arg)."""
+        """Copy a video file from the phone to the local destination.
+
+        Args:
+            name: The name of the file to copy.
+            dest_dir: Local directory where the file should be saved.
+
+        Returns:
+            The absolute path to the copied file on the local disk.
+
+        Raises:
+            FileNotOnPhone: If the file cannot be found on the phone.
+            TimeoutError: If the asynchronous copy takes too long.
+        """
         item = None
         for path in self.folders:
             folder = self._resolve(path)
@@ -160,12 +237,32 @@ class MtpPhoneSource:
 
 
 class FakePhoneSource:
-    """Test double. catalog: folder path -> list of (name, source_path_on_disk)."""
+    """Test double for PhoneSource.
+
+    Attributes:
+        catalog: Mapping of folder paths to lists of (name, source_path_on_disk).
+    """
 
     def __init__(self, catalog: dict):
+        """Initialize the FakePhoneSource.
+
+        Args:
+            catalog: The mock file system mapping.
+        """
         self.catalog = catalog
 
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]:
+        """List mock videos in the specified folders.
+
+        Args:
+            folders: List of folder paths to scan.
+
+        Returns:
+            A list of PhoneVideo objects.
+
+        Raises:
+            FolderNotOnPhone: If a folder is not in the catalog.
+        """
         out: list[PhoneVideo] = []
         for folder in folders:
             if folder not in self.catalog:
@@ -174,6 +271,18 @@ class FakePhoneSource:
         return out
 
     def copy(self, name: str, dest_dir: str) -> str:
+        """Copy a mock video from the catalog to the local destination.
+
+        Args:
+            name: The name of the file to copy.
+            dest_dir: Local directory for the copy.
+
+        Returns:
+            The absolute path to the copied file.
+
+        Raises:
+            FileNotOnPhone: If the file is not found in the catalog.
+        """
         for entries in self.catalog.values():
             for n, src in entries:
                 if n == name:
@@ -185,6 +294,17 @@ class FakePhoneSource:
 
 
 def ffprobe_duration(path: str) -> float:
+    """Get the duration of a video file using ffprobe.
+
+    Args:
+        path: Path to the video file.
+
+    Returns:
+        The duration in seconds.
+
+    Raises:
+        subprocess.CalledProcessError: If ffprobe fails.
+    """
     res = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", path],
@@ -199,6 +319,17 @@ def ingest_originals(
     dest_dir: str,
     probe: Callable[[str], float] = ffprobe_duration,
 ) -> list[Original]:
+    """Ingest original videos from a phone source into a local directory.
+
+    Args:
+        source: The phone source implementation.
+        folders: List of folders on the phone to ingest from.
+        dest_dir: Local directory to store the ingested files.
+        probe: Function to calculate video duration. Defaults to ffprobe_duration.
+
+    Returns:
+        A list of Original objects representing the ingested videos.
+    """
     originals: list[Original] = []
     for video in source.list_videos(folders):
         path = source.copy(video.name, dest_dir)

@@ -1,0 +1,15 @@
+Launching Top 10 Pipeline...
++--------------------- Traceback (most recent call last) ---------------------+
+| C:\workdir\uw\scraper\insta2yorube\src\social2shorts\cli.py:342 in run_top  |
+|                                                                             |
+|   339                                                                       |
+|   340     console.print(f'[bold blue]Launching Top {limit}                  |
+|       Pipeline...[/bold blue]')                                             |
+|   341                                                                       |
+| > 342     report = run_top(                                                 |
+|   343         settings, phone, deps, limit, privacy.value if privacy else   |
+|       settings.default_privacy                                              |
+|   344     )                                                                 |
+|   345                                                                       |
++-----------------------------------------------------------------------------+
+TypeError: run_top() takes from 0 to 3 positional arguments but 5 were given

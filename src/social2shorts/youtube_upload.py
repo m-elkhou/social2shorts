@@ -24,6 +24,18 @@ class AuthRefreshError(Exception):
 
 
 def get_credentials(client_secrets: str, token_path: str) -> Credentials:
+    """Manage YouTube OAuth credentials, including loading and refreshing.
+
+    Args:
+        client_secrets: Path to the client secrets JSON file.
+        token_path: Path where the authorized token is stored.
+
+    Returns:
+        A valid Google Credentials object.
+
+    Raises:
+        AuthRefreshError: If the token is corrupt or cannot be refreshed.
+    """
     creds = None
     if os.path.exists(token_path):
         try:
@@ -48,6 +60,12 @@ def get_credentials(client_secrets: str, token_path: str) -> Credentials:
 
 
 def _save(creds: Credentials, token_path: str) -> None:
+    """Save credentials to a file with restricted permissions.
+
+    Args:
+        creds: The credentials to save.
+        token_path: Path to the token file.
+    """
     # Token holds the refresh token (a secret): owner-only perms.
     # On Windows 0o600 is best-effort (POSIX mode maps to the read-only
     # attribute, not full ACLs); correct on POSIX, harmless on Windows.
@@ -64,6 +82,15 @@ def _save(creds: Credentials, token_path: str) -> None:
 
 def build_service(client_secrets: str = "secrets/client_secret.json",
                   token_path: str = "secrets/token.json") -> Any:
+    """Create a YouTube API service object.
+
+    Args:
+        client_secrets: Path to the client secrets JSON file.
+        token_path: Path to the token JSON file.
+
+    Returns:
+        A Google API client service object for YouTube v3.
+    """
     from googleapiclient.discovery import build
 
     creds = get_credentials(client_secrets, token_path)
@@ -71,6 +98,15 @@ def build_service(client_secrets: str = "secrets/client_secret.json",
 
 
 def build_body(meta: ShortMeta, privacy: str) -> dict:
+    """Construct the request body for a YouTube video upload.
+
+    Args:
+        meta: The metadata for the short.
+        privacy: The privacy status (e.g., 'public', 'private', 'unlisted').
+
+    Returns:
+        A dictionary formatted for the YouTube API videos.insert method.
+    """
     return {
         "snippet": {
             "title": meta.title,
@@ -86,6 +122,17 @@ def build_body(meta: ShortMeta, privacy: str) -> dict:
 
 
 def upload_short(video_path: str, meta: ShortMeta, privacy: str, service=None) -> str:
+    """Upload a video as a YouTube Short using a resumable upload.
+
+    Args:
+        video_path: Path to the video file.
+        meta: The metadata for the upload.
+        privacy: The privacy status for the video.
+        service: Optional YouTube API service object. If None, one is created.
+
+    Returns:
+        The ID of the uploaded YouTube video.
+    """
     from googleapiclient.http import MediaFileUpload
 
     service = service or build_service()
@@ -100,6 +147,13 @@ def upload_short(video_path: str, meta: ShortMeta, privacy: str, service=None) -
 
 
 def set_privacy(video_id: str, privacy: str, service=None) -> None:
+    """Update the privacy status of an existing YouTube video.
+
+    Args:
+        video_id: The ID of the YouTube video.
+        privacy: The new privacy status.
+        service: Optional YouTube API service object. If None, one is created.
+    """
     service = service or build_service()
     service.videos().update(
         part="status",

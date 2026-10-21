@@ -24,6 +24,13 @@ MAX_WORDS_PER_CUE = 4
 
 @dataclass
 class Segment:
+    """Represents a transcribed speech segment.
+
+    Attributes:
+        start: Start time of the segment in seconds.
+        end: End time of the segment in seconds.
+        text: The transcribed text.
+    """
     start: float
     end: float
     text: str
@@ -31,6 +38,20 @@ class Segment:
 
 @dataclass(frozen=True)
 class AssStyle:
+    """Defines the visual style for ASS subtitles.
+
+    Attributes:
+        font: Font family name.
+        size: Font size.
+        primary: Primary text color in ASS hex format.
+        outline_color: Outline color in ASS hex format.
+        back: Background/shadow color in ASS hex format.
+        outline: Outline thickness.
+        shadow: Shadow depth.
+        margin_v: Vertical margin from the top.
+        play_w: Playback width of the canvas.
+        play_h: Playback height of the canvas.
+    """
     font: str = "Arial"
     size: int = 72
     primary: str = "&H00FFFFFF"  # white
@@ -48,15 +69,26 @@ DEFAULT_STYLE = AssStyle()
 
 # ---------------------------------------------------------------- transcribe
 def _default_model():
+    """Initialize the default faster-whisper model.
+
+    Returns:
+        An initialized WhisperModel instance.
+    """
     from faster_whisper import WhisperModel
 
     return WhisperModel(DEFAULT_WHISPER_SIZE, device="auto", compute_type="auto")
 
 
 def transcribe(path: str, model=None) -> list[Segment]:
-    """Transcribe with faster-whisper (auto language). [] when no speech.
+    """Transcribe audio from a file using faster-whisper.
 
-    `model` is any object with `.transcribe(path, ...) -> (segments, info)`.
+    Args:
+        path: Path to the audio/video file.
+        model: Optional pre-initialized transcription model. If None,
+            the default model is used.
+
+    Returns:
+        A list of Segment objects. Returns an empty list if no speech is detected.
     """
     model = model if model is not None else _default_model()
     segs, _info = model.transcribe(path, vad_filter=True)
@@ -70,6 +102,14 @@ def transcribe(path: str, model=None) -> list[Segment]:
 
 # ----------------------------------------------------------------------- ASS
 def _ts(t: float) -> str:
+    """Convert seconds to ASS timestamp format (H:MM:SS.cc).
+
+    Args:
+        t: Time in seconds.
+
+    Returns:
+        The formatted timestamp string.
+    """
     cs = int(round(max(t, 0.0) * 100))
     h, rem = divmod(cs, 360000)
     m, rem = divmod(rem, 6000)
@@ -78,7 +118,14 @@ def _ts(t: float) -> str:
 
 
 def _split_cues(seg: Segment) -> list[Segment]:
-    """Split a segment into short phrases, time shared by word count."""
+    """Split a segment into short phrases, distributing time by word count.
+
+    Args:
+        seg: The speech segment to split.
+
+    Returns:
+        A list of shorter Segment objects.
+    """
     words = seg.text.split()
     if not words:
         return []
@@ -94,7 +141,15 @@ def _split_cues(seg: Segment) -> list[Segment]:
 
 
 def render_ass(segments: list[Segment], style: AssStyle = DEFAULT_STYLE) -> str:
-    """Pure: ASS subtitle text. Bold white, heavy outline/shadow, bottom-center."""
+    """Generate the full ASS subtitle text.
+
+    Args:
+        segments: List of transcribed speech segments.
+        style: The visual style to apply to the subtitles.
+
+    Returns:
+        The complete ASS file content as a string.
+    """
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -123,7 +178,16 @@ def render_ass(segments: list[Segment], style: AssStyle = DEFAULT_STYLE) -> str:
 def build_ass(
     segments: list[Segment], style: AssStyle = DEFAULT_STYLE, out_path: str | None = None
 ) -> str:
-    """Write the ASS file and return its path."""
+    """Write the ASS subtitle content to a file.
+
+    Args:
+        segments: List of transcribed speech segments.
+        style: The visual style to apply.
+        out_path: Optional path to save the file. If None, a temporary file is created.
+
+    Returns:
+        The absolute path to the created ASS file.
+    """
     content = render_ass(segments, style)
     if out_path is None:
         fd, out_path = tempfile.mkstemp(suffix=".ass")
@@ -140,6 +204,14 @@ _PLATFORM = re.compile(r"\b(tik\s?tok|instagram|insta|reels?)\b", re.I)
 
 
 def _clean_title(title: str) -> str:
+    """Strip handles, spam tags, and platform mentions from a title.
+
+    Args:
+        title: The raw title string.
+
+    Returns:
+        The cleaned and truncated title.
+    """
     t = _HANDLE.sub(" ", str(title))
     t = _SPAM_TAG.sub(" ", t)
     t = _PLATFORM.sub(" ", t)
@@ -148,11 +220,26 @@ def _clean_title(title: str) -> str:
 
 
 def _norm_tag(tag: str) -> str:
+    """Normalize a hashtag by removing the '#' and converting to lowercase.
+
+    Args:
+        tag: The raw tag string.
+
+    Returns:
+        The normalized tag.
+    """
     return re.sub(r"\s+", "", str(tag).lstrip("#")).lower()
 
 
 def sanitize_meta(raw: dict) -> ShortMeta:
-    """Pure/deterministic: enforce YouTube limits and strip cross-platform noise."""
+    """Enforce YouTube limits and strip cross-platform noise from metadata.
+
+    Args:
+        raw: Dictionary containing raw metadata (title, description, tags).
+
+    Returns:
+        A ShortMeta object with sanitized values.
+    """
     title = _clean_title(raw.get("title", ""))
     description = str(raw.get("description", "")).strip()
     seen: list[str] = []
@@ -166,6 +253,15 @@ def sanitize_meta(raw: dict) -> ShortMeta:
 
 
 def _build_prompt(entry: CatalogEntry, transcript_text: str) -> str:
+    """Construct the LLM prompt for generating YouTube Shorts metadata.
+
+    Args:
+        entry: The catalog entry containing the original caption.
+        transcript_text: The transcribed text of the video.
+
+    Returns:
+        The prompt string for the LLM.
+    """
     return (
         "You write YouTube Shorts metadata for a motorcycle channel (night riding). "
         "Rewrite in your own words, YouTube-native, never copying the original caption. "
@@ -178,10 +274,18 @@ def _build_prompt(entry: CatalogEntry, transcript_text: str) -> str:
 
 
 def gemini_call(prompt: str, model_name: str | None = None) -> str:
-    """Default LLM: Gemini via GEMINI_API_KEY (free key). Public content only.
+    """Call the Gemini LLM via API.
 
-    Model name: `model_name` arg (callers pass Settings.gemini_model), else
-    env GEMINI_MODEL, else a default.
+    Args:
+        prompt: The prompt to send to the LLM.
+        model_name: Optional model identifier. Defaults to GEMINI_MODEL env var
+            or DEFAULT_GEMINI_MODEL.
+
+    Returns:
+        The LLM's response text.
+
+    Raises:
+        KeyError: If GEMINI_API_KEY is not set in the environment.
     """
     import google.generativeai as genai
 
@@ -195,6 +299,17 @@ def gemini_call(prompt: str, model_name: str | None = None) -> str:
 
 
 def _parse_json(text: str) -> dict:
+    """Extract and parse a JSON object from a text string.
+
+    Args:
+        text: The text containing the JSON.
+
+    Returns:
+        The parsed dictionary.
+
+    Raises:
+        ValueError: If the text does not contain a valid JSON object.
+    """
     text = text.strip()
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0) if m else text)
@@ -208,5 +323,14 @@ def generate_metadata(
     transcript_text: str,
     llm: Callable[[str], str] = gemini_call,
 ) -> ShortMeta:
-    """Prompt the LLM with caption + transcript, parse JSON, sanitize."""
+    """Generate sanitized YouTube metadata using an LLM.
+
+    Args:
+        entry: The catalog entry for the video.
+        transcript_text: The transcription of the video's audio.
+        llm: The LLM calling function. Defaults to gemini_call.
+
+    Returns:
+        A ShortMeta object containing the generated metadata.
+    """
     return sanitize_meta(_parse_json(llm(_build_prompt(entry, transcript_text))))
