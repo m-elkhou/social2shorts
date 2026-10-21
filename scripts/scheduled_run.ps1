@@ -1,9 +1,9 @@
 # scripts/scheduled_run.ps1
-# Registers the insta2youtube app as a Windows Scheduled Task.
+# Registers the social2shorts app as a Windows Scheduled Task.
 
 $TaskName = "Insta2YouTube_Continuous"
 $PythonExe = "C:\workdir\uw\scraper\insta2yorube\.venv\Scripts\python.exe"
-$ScriptPath = "C:\workdir\uw\scraper\insta2yorube\src\insta2youtube\cli.py"
+$ScriptPath = "C:\workdir\uw\scraper\insta2yorube\src\social2shorts\cli.py"
 $Args = "run-continuous" # Assuming cli.py has this command
 
 # Run every 4 hours

@@ -1,4 +1,4 @@
-# Design — insta2youtube (motoride-mh)
+# Design — social2shorts (motoride-mh)
 
 > Repurposer les **meilleures** vidéos moto de @motoride.mh (TikTok / Instagram)
 > en **YouTube Shorts qualité pro, propres et monétisables** sur @motoride-mh.

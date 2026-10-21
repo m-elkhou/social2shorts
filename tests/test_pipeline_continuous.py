@@ -1,9 +1,9 @@
-from insta2youtube.enrich import Segment
-from insta2youtube.config import Settings
-from insta2youtube.ingest import FakePhoneSource
-from insta2youtube.models import CatalogEntry, Original, Platform, ShortMeta
-from insta2youtube.pipeline import PipelineDeps, run_backlog, run_continuous
-from insta2youtube.youtube_upload import AuthRefreshError
+from social2shorts.enrich import Segment
+from social2shorts.config import Settings
+from social2shorts.ingest import FakePhoneSource
+from social2shorts.models import CatalogEntry, Original, Platform, ShortMeta
+from social2shorts.pipeline import PipelineDeps, run_backlog, run_continuous
+from social2shorts.youtube_upload import AuthRefreshError
 
 def _e(sid, dur, track="original sound"):
     return CatalogEntry(platform=Platform.tiktok, source_id=sid, url=f"http://x/{sid}",
@@ -43,7 +43,7 @@ def test_run_continuous_processes_only_unseen(tmp_path):
     # We don't assume A uploads here, but we check if it's in the ledger.
     # If A uploaded, it's in ledger. If it failed, it's not.
     # To be sure for the 'continuous' test, let's just manually put A in the ledger.
-    from insta2youtube.db import Store
+    from social2shorts.db import Store
     store = Store(s.db_path)
     store.init_schema()
 

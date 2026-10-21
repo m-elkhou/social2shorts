@@ -1,5 +1,5 @@
-from insta2youtube.db import Store
-from insta2youtube.models import CatalogEntry, Platform
+from social2shorts.db import Store
+from social2shorts.models import CatalogEntry, Platform
 
 def test_cross_platform_dedupe(tmp_path):
     s = Store(str(tmp_path/"db.sqlite"))

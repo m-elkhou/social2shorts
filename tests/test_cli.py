@@ -1,10 +1,10 @@
 from typer.testing import CliRunner
 
-from insta2youtube import cli
-from insta2youtube.cli import app
-from insta2youtube.db import Store
-from insta2youtube.models import CatalogEntry, ItemStatus, Platform
-from insta2youtube.pipeline import PipelineDeps, RunReport
+from social2shorts import cli
+from social2shorts.cli import app
+from social2shorts.db import Store
+from social2shorts.models import CatalogEntry, ItemStatus, Platform
+from social2shorts.pipeline import PipelineDeps, RunReport
 
 runner = CliRunner()
 
@@ -143,7 +143,7 @@ def test_review_approve_removes_row(tmp_path):
 
 
 def test_ingest_limit_bounds_copy(monkeypatch, tmp_path):
-    from insta2youtube.ingest import FakePhoneSource, PhoneVideo
+    from social2shorts.ingest import FakePhoneSource, PhoneVideo
     cfg, _ = _cfg(tmp_path)
     copied = []
 

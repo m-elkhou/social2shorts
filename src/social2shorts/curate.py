@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import math
 
-from insta2youtube.config import Settings
-from insta2youtube.models import CatalogEntry
+from social2shorts.config import Settings
+from social2shorts.models import CatalogEntry
 
 SWEET_SPOT_S = (15.0, 60.0)
 

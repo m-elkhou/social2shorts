@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from insta2youtube.models import Original
+from social2shorts.models import Original
 
 VIDEO_EXT = re.compile(r"\.(mp4|mov|3gp|mkv|m4v)$", re.IGNORECASE)
 DURATION_HEADER = re.compile(r"Longueur|Length|Durée|Duration", re.IGNORECASE)

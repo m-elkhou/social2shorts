@@ -1,6 +1,6 @@
-from insta2youtube.config import Settings
-from insta2youtube.curate import curate, is_eligible, score
-from insta2youtube.models import CatalogEntry, Platform
+from social2shorts.config import Settings
+from social2shorts.curate import curate, is_eligible, score
+from social2shorts.models import CatalogEntry, Platform
 
 
 def _entry(duration=30.0, view_count=100, like_count=0, comment_count=0, sid="x"):

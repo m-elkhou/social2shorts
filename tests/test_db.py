@@ -1,5 +1,5 @@
-from insta2youtube.db import Store
-from insta2youtube.models import CatalogEntry
+from social2shorts.db import Store
+from social2shorts.models import CatalogEntry
 
 
 def test_upsert_and_fingerprint_idempotent(tmp_path):

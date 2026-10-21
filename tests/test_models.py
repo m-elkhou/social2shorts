@@ -1,4 +1,4 @@
-from insta2youtube.models import CatalogEntry
+from social2shorts.models import CatalogEntry
 
 
 def test_catalog_entry_is_original_audio():

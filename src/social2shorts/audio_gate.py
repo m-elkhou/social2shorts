@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from insta2youtube.models import CatalogEntry
+from social2shorts.models import CatalogEntry
 
 
 def classify(e: CatalogEntry) -> Literal["original", "licensed"]:

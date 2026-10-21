@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from insta2youtube.enrich import (
+from social2shorts.enrich import (
     DEFAULT_STYLE,
     FIXED_TAGS,
     Segment,
@@ -11,7 +11,7 @@ from insta2youtube.enrich import (
     sanitize_meta,
     transcribe,
 )
-from insta2youtube.models import CatalogEntry, Platform
+from social2shorts.models import CatalogEntry, Platform
 
 
 def _entry(caption="@bob ride at night #fyp TikTok"):

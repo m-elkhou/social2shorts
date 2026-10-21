@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from insta2youtube.discover import DiscoveryError, discover_tiktok, download_reference, parse_entry
+from social2shorts.discover import DiscoveryError, discover_tiktok, download_reference, parse_entry
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -51,7 +51,7 @@ def test_download_reference_returns_path(tmp_path):
 def test_build_opts_defaults_and_ytdlp_constructs():
     import yt_dlp
 
-    from insta2youtube.discover import build_opts
+    from social2shorts.discover import build_opts
 
     o = build_opts({"playlistend": 3})
     assert "impersonate" not in o and o["playlistend"] == 3 and o["ignoreerrors"]

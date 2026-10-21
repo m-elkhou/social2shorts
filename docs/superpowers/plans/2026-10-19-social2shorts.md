@@ -1,4 +1,4 @@
-# insta2youtube (motoride-mh) Implementation Plan
+# social2shorts (motoride-mh) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -40,7 +40,7 @@ insta2yorube/
   pyproject.toml                     # uv project, deps, pytest config
   config.example.toml                # sample config (paths, thresholds, api)
   .gitignore                         # secrets/, *.sqlite, originals/, work/, tokens
-  src/insta2youtube/
+  src/social2shorts/
     __init__.py
     config.py        # pydantic Settings; load_config(path) -> Settings
     models.py        # pydantic models: CatalogEntry, Original, MatchResult, ShortMeta, enums
@@ -69,7 +69,7 @@ insta2yorube/
 ## Task 1: Project scaffold, config, models, store
 
 **Files:**
-- Create: `pyproject.toml`, `.gitignore`, `config.example.toml`, `src/insta2youtube/__init__.py`, `src/insta2youtube/config.py`, `src/insta2youtube/models.py`, `src/insta2youtube/db.py`
+- Create: `pyproject.toml`, `.gitignore`, `config.example.toml`, `src/social2shorts/__init__.py`, `src/social2shorts/config.py`, `src/social2shorts/models.py`, `src/social2shorts/db.py`
 - Test: `tests/test_config.py`, `tests/test_models.py`, `tests/test_db.py`
 
 **Interfaces:**
@@ -117,7 +117,7 @@ def test_upsert_and_fingerprint_idempotent(tmp_path):
 ## Task 2: TikTok discovery
 
 **Files:**
-- Create: `src/insta2youtube/discover.py`
+- Create: `src/social2shorts/discover.py`
 - Test: `tests/test_discover.py`, `tests/fixtures/tiktok_flat.json`, `tests/fixtures/tiktok_entry.json`
 
 **Interfaces:**
@@ -140,7 +140,7 @@ def test_discover_raises_on_empty():
 - [ ] **Step 2: Run tests, verify fail** — `uv run pytest tests/test_discover.py -q` → FAIL.
 - [ ] **Step 3: Implement `discover.py`.** `discover_tiktok` calls the injected `ytdlp` runner with `--flat-playlist`/`--dump-json` then per-entry `--dump-json` (or a single `--dump-single-json`); maps via `parse_entry`; **raises `DiscoveryError` if zero entries**. `run_ytdlp` default uses `yt_dlp.YoutubeDL` with `impersonate` target when available; `download_reference` selects the no-watermark `h264_540p*` format into `work/refs/`.
 - [ ] **Step 4: Run tests, verify pass** — PASS.
-- [ ] **Step 5: Integration check (real network, manual).** `uv run python -m insta2youtube.cli discover --limit 0` against the real profile; expect **≥ 200** catalog rows and non-empty `track` on a sample. (Record count in output; do not assert in CI.)
+- [ ] **Step 5: Integration check (real network, manual).** `uv run python -m social2shorts.cli discover --limit 0` against the real profile; expect **≥ 200** catalog rows and non-empty `track` on a sample. (Record count in output; do not assert in CI.)
 - [ ] **Step 6: Commit** — `feat: tiktok discovery via yt-dlp with empty-response guard`.
 
 ---
@@ -148,7 +148,7 @@ def test_discover_raises_on_empty():
 ## Task 3: Curation (pure)
 
 **Files:**
-- Create: `src/insta2youtube/curate.py`
+- Create: `src/social2shorts/curate.py`
 - Test: `tests/test_curate.py`
 
 **Interfaces:**
@@ -179,7 +179,7 @@ def test_curate_sorts_by_engagement():
 ## Task 4: Audio gate (pure)
 
 **Files:**
-- Create: `src/insta2youtube/audio_gate.py`
+- Create: `src/social2shorts/audio_gate.py`
 - Test: `tests/test_audio_gate.py`
 
 **Interfaces:**
@@ -204,7 +204,7 @@ def test_classify_audio():
 ## Task 5: Phone ingestion (MTP) behind an interface
 
 **Files:**
-- Create: `src/insta2youtube/ingest.py`
+- Create: `src/social2shorts/ingest.py`
 - Test: `tests/test_ingest.py`
 
 **Interfaces:**
@@ -228,7 +228,7 @@ def test_fake_copy_and_missing(tmp_path):
 - [ ] **Step 2: Run tests, verify fail.** → FAIL.
 - [ ] **Step 3: Implement `ingest.py`.** `MtpPhoneSource` uses `win32com.client.Dispatch("Shell.Application")`, finds the device by `phone_name_match`, walks `Movies/Edits` etc.; `list_videos` reads name + duration (details column discovered by header scan, as validated in the spike); `copy` uses `Folder.CopyHere` and polls for the destination file, **raising `FileNotOnPhone` if the item isn't present and `PhoneNotFound` if the device is absent** (never skip silently). `FakePhoneSource` satisfies the Protocol for tests.
 - [ ] **Step 4: Run tests, verify pass.** → PASS.
-- [ ] **Step 5: Integration check (real phone, manual).** `uv run python -m insta2youtube.cli ingest --limit 2`; expect 2 files copied into `originals/`, ffprobe shows **≥1080 height, vertical**.
+- [ ] **Step 5: Integration check (real phone, manual).** `uv run python -m social2shorts.cli ingest --limit 2`; expect 2 files copied into `originals/`, ffprobe shows **≥1080 height, vertical**.
 - [ ] **Step 6: Commit** — `feat: MTP phone ingestion with fake for tests`.
 
 ---
@@ -236,7 +236,7 @@ def test_fake_copy_and_missing(tmp_path):
 ## Task 6: Perceptual hashing + matching
 
 **Files:**
-- Create: `src/insta2youtube/phash.py`, `src/insta2youtube/match.py`
+- Create: `src/social2shorts/phash.py`, `src/social2shorts/match.py`
 - Test: `tests/test_phash.py`, `tests/test_match.py`
 
 **Interfaces:**
@@ -274,7 +274,7 @@ def test_match_unique_winner():
 ## Task 7: Transcode to 1080×1920 (ffmpeg)
 
 **Files:**
-- Create: `src/insta2youtube/transcode.py`
+- Create: `src/social2shorts/transcode.py`
 - Test: `tests/test_transcode.py`
 
 **Interfaces:**
@@ -301,7 +301,7 @@ def test_build_args_scales_pads_and_burns():
 ## Task 8: Enrichment — captions + metadata
 
 **Files:**
-- Create: `src/insta2youtube/enrich.py`
+- Create: `src/social2shorts/enrich.py`
 - Test: `tests/test_enrich.py`
 
 **Interfaces:**
@@ -334,7 +334,7 @@ def test_sanitize_meta_caps_title_and_tags():
 ## Task 9: YouTube upload (OAuth + insert)
 
 **Files:**
-- Create: `src/insta2youtube/youtube_upload.py`
+- Create: `src/social2shorts/youtube_upload.py`
 - Test: `tests/test_youtube_upload.py`
 
 **Interfaces:**
@@ -369,7 +369,7 @@ def test_refresh_failure_raises(monkeypatch, tmp_path):
 ## Task 10: Pipeline orchestration (backlog) + idempotent ledger
 
 **Files:**
-- Create: `src/insta2youtube/pipeline.py`
+- Create: `src/social2shorts/pipeline.py`
 - Test: `tests/test_pipeline.py`
 
 **Interfaces:**
@@ -397,8 +397,8 @@ def test_backlog_routes_by_audio_and_match_and_is_idempotent(tmp_path):
 ## Task 11: CLI (Phase-1 complete)
 
 **Files:**
-- Create: `src/insta2youtube/cli.py`
-- Modify: `pyproject.toml` (console script `insta2youtube`)
+- Create: `src/social2shorts/cli.py`
+- Modify: `pyproject.toml` (console script `social2shorts`)
 - Test: `tests/test_cli.py`
 
 **Interfaces:**
@@ -417,14 +417,14 @@ def test_run_invokes_pipeline(monkeypatch):
 - [ ] **Step 2: Run test, verify fail.** → FAIL.
 - [ ] **Step 3: Implement `cli.py`** with `typer`+`rich` tables; wire each command to its module; `review`/`publish` operate on the Store.
 - [ ] **Step 4: Run test, verify pass.** → PASS.
-- [ ] **Step 5: End-to-end dry run (manual, user-gated).** `insta2youtube run --limit 3 --privacy unlisted` with the phone connected and OAuth done → **3 unlisted Shorts** live for the user to review. This is the Phase-1 deliverable.
+- [ ] **Step 5: End-to-end dry run (manual, user-gated).** `social2shorts run --limit 3 --privacy unlisted` with the phone connected and OAuth done → **3 unlisted Shorts** live for the user to review. This is the Phase-1 deliverable.
 - [ ] **Step 6: Commit** — `feat: cli (auth/discover/ingest/run/review/publish/status)`.
 
 ---
 
 ## Task 12: Post-upload Content-ID check *(Phase 2)*
 
-**Files:** Create `src/insta2youtube/contentid.py`; Test `tests/test_contentid.py`.
+**Files:** Create `src/social2shorts/contentid.py`; Test `tests/test_contentid.py`.
 
 **Interfaces:** `contentid.check_claims(video_id, service=...) -> list[Claim]`; `contentid.guard_after_upload(video_id, on_claim) -> None` (if claims found: set `private` + flag review).
 

@@ -1,4 +1,4 @@
-from insta2youtube.transcode import build_args
+from social2shorts.transcode import build_args
 
 
 def test_build_args_scales_pads_and_burns():

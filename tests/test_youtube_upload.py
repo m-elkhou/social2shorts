@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-from insta2youtube import youtube_upload as yu
-from insta2youtube.models import ShortMeta
-from insta2youtube.youtube_upload import AuthRefreshError, build_body, get_credentials
+from social2shorts import youtube_upload as yu
+from social2shorts.models import ShortMeta
+from social2shorts.youtube_upload import AuthRefreshError, build_body, get_credentials
 
 META = ShortMeta(title="t", description="d", tags=["moto"])
 

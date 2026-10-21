@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from insta2youtube.models import CatalogEntry, ShortMeta
+from social2shorts.models import CatalogEntry, ShortMeta
 
 DEFAULT_WHISPER_SIZE = "small"  # multilingual (FR/AR/EN)
 DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"

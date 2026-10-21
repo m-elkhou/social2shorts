@@ -1,14 +1,14 @@
 import pytest
 from unittest.mock import MagicMock, patch
-import insta2youtube.contentid as contentid
+import social2shorts.contentid as contentid
 
 def test_guard_after_upload_no_claims():
     service = MagicMock()
     on_claim = MagicMock()
     video_id = "vid123"
 
-    with patch("insta2youtube.contentid.check_claims", return_value=[]), \
-         patch("insta2youtube.contentid.youtube_upload", create=True) as mock_yt:
+    with patch("social2shorts.contentid.check_claims", return_value=[]), \
+         patch("social2shorts.contentid.youtube_upload", create=True) as mock_yt:
 
         contentid.guard_after_upload(video_id, on_claim, service)
         on_claim.assert_not_called()
@@ -24,10 +24,10 @@ def test_guard_after_upload_with_claims():
     # Or more simply, mock the youtube_upload module in sys.modules.
     import sys
     mock_yt = MagicMock()
-    sys.modules["insta2youtube.youtube_upload"] = mock_yt
+    sys.modules["social2shorts.youtube_upload"] = mock_yt
 
     try:
-        with patch("insta2youtube.contentid.check_claims", return_value=[contentid.Claim(reason="Copyrighted Music", severity="high")]):
+        with patch("social2shorts.contentid.check_claims", return_value=[contentid.Claim(reason="Copyrighted Music", severity="high")]):
             contentid.guard_after_upload(video_id, on_claim, service)
 
             # Verify privacy set to private
@@ -35,4 +35,4 @@ def test_guard_after_upload_with_claims():
             # Verify on_claim called with the reason
             on_claim.assert_called_once_with("Copyrighted Music")
     finally:
-        del sys.modules["insta2youtube.youtube_upload"]
+        del sys.modules["social2shorts.youtube_upload"]

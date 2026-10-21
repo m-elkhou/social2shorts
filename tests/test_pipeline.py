@@ -1,9 +1,9 @@
-from insta2youtube.enrich import Segment
-from insta2youtube.config import Settings
-from insta2youtube.ingest import FakePhoneSource
-from insta2youtube.models import CatalogEntry, Original, Platform, ShortMeta
-from insta2youtube.pipeline import PipelineDeps, run_backlog
-from insta2youtube.youtube_upload import AuthRefreshError
+from social2shorts.enrich import Segment
+from social2shorts.config import Settings
+from social2shorts.ingest import FakePhoneSource
+from social2shorts.models import CatalogEntry, Original, Platform, ShortMeta
+from social2shorts.pipeline import PipelineDeps, run_backlog
+from social2shorts.youtube_upload import AuthRefreshError
 
 
 def _e(sid, dur, track="original sound"):
@@ -104,13 +104,13 @@ def test_item_error_isolated_and_loop_continues(tmp_path):
     assert not r.uploaded and r.alert is None
     assert "A" in r.review and "B" in r.review      # A failed, B licensed
     assert r.pending == ["C"]                       # later entry still processed
-    from insta2youtube.db import Store
+    from social2shorts.db import Store
     reasons = [x["reason"] for x in Store(str(tmp_path / "db.sqlite")).reviews()]
     assert any(x.startswith("processing error: ZeroDivisionError: boom") for x in reasons)
 
 
 def test_db_error_on_one_entry_does_not_abort(tmp_path, monkeypatch):
-    from insta2youtube.db import Store
+    from social2shorts.db import Store
     orig = Store.is_uploaded
     monkeypatch.setattr(Store, "is_uploaded",
                         lambda self, fp: (_ for _ in ()).throw(RuntimeError("db")) if self._n(fp) else orig(self, fp))

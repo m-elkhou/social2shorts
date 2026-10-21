@@ -1,5 +1,5 @@
-from insta2youtube.audio_gate import classify
-from insta2youtube.models import CatalogEntry, Platform
+from social2shorts.audio_gate import classify
+from social2shorts.models import CatalogEntry, Platform
 
 
 def _entry(track: str, artist: str) -> CatalogEntry:

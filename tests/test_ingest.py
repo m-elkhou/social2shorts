@@ -1,6 +1,6 @@
 import pytest
 
-from insta2youtube.ingest import FakePhoneSource, FileNotOnPhone, ingest_originals
+from social2shorts.ingest import FakePhoneSource, FileNotOnPhone, ingest_originals
 
 
 def test_fake_copy_and_missing(tmp_path):
@@ -23,7 +23,7 @@ def test_ingest_originals_with_fake_probe(tmp_path):
 
 
 def test_missing_folder_raises(tmp_path):
-    from insta2youtube.ingest import FolderNotOnPhone
+    from social2shorts.ingest import FolderNotOnPhone
 
     fake = FakePhoneSource({"Movies/Edits": []})
     with pytest.raises(FolderNotOnPhone):
@@ -31,7 +31,7 @@ def test_missing_folder_raises(tmp_path):
 
 
 def test_parse_duration():
-    from insta2youtube.ingest import _parse_duration
+    from social2shorts.ingest import _parse_duration
 
     assert _parse_duration("") is None
     assert _parse_duration("00:00:15") == 15.0

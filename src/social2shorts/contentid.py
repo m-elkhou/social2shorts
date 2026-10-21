@@ -28,7 +28,7 @@ def guard_after_upload(
     """
     claims = check_claims(video_id, service)
     if claims:
-        import insta2youtube.youtube_upload as youtube_upload
+        import social2shorts.youtube_upload as youtube_upload
         # Set to private immediately
         youtube_upload.set_privacy(video_id, "private", service=service)
 

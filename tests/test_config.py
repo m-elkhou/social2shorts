@@ -1,4 +1,4 @@
-from insta2youtube.config import load_config
+from social2shorts.config import load_config
 
 
 def test_load_config_defaults(tmp_path):

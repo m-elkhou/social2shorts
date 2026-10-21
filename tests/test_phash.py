@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from insta2youtube.phash import min_distance, phash_file
+from social2shorts.phash import min_distance, phash_file
 
 
 def test_min_distance_zero_on_identical():

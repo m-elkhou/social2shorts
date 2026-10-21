@@ -7,14 +7,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from insta2youtube import curate as curate_mod
-from insta2youtube import youtube_upload
-from insta2youtube.config import Settings, load_config
-from insta2youtube.db import Store
-from insta2youtube.discover import discover_tiktok
-from insta2youtube.ingest import MtpPhoneSource, ingest_originals
-from insta2youtube.models import ItemStatus
-from insta2youtube.pipeline import PipelineDeps, run_backlog, run_continuous
+from social2shorts import curate as curate_mod
+from social2shorts import youtube_upload
+from social2shorts.config import Settings, load_config
+from social2shorts.db import Store
+from social2shorts.discover import discover_tiktok
+from social2shorts.ingest import MtpPhoneSource, ingest_originals
+from social2shorts.models import ItemStatus
+from social2shorts.pipeline import PipelineDeps, run_backlog, run_continuous
 
 app = typer.Typer(help="Republish curated TikTok videos as YouTube Shorts.", no_args_is_help=True)
 console = Console()

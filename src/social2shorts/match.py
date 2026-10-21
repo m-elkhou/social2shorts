@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from insta2youtube.models import CatalogEntry, ItemStatus, MatchResult, Original
-from insta2youtube.phash import min_distance
+from social2shorts.models import CatalogEntry, ItemStatus, MatchResult, Original
+from social2shorts.phash import min_distance
 
 
 def match_one(

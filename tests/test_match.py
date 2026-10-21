@@ -1,5 +1,5 @@
-from insta2youtube.match import match_one
-from insta2youtube.models import CatalogEntry, ItemStatus, Original, Platform
+from social2shorts.match import match_one
+from social2shorts.models import CatalogEntry, ItemStatus, Original, Platform
 
 
 def _entry(duration: float) -> CatalogEntry:

@@ -6,14 +6,14 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from insta2youtube import audio_gate, contentid, curate, enrich, match, transcode, youtube_upload
-from insta2youtube.config import Settings
-from insta2youtube.db import Store
-from insta2youtube.discover import discover_tiktok
-from insta2youtube.discover import download_reference as _download_reference
-from insta2youtube.ingest import PhoneSource, ingest_originals
-from insta2youtube.models import CatalogEntry, ItemStatus, Original, ShortMeta
-from insta2youtube.phash import phash_file as _phash_file
+from social2shorts import audio_gate, contentid, curate, enrich, match, transcode, youtube_upload
+from social2shorts.config import Settings
+from social2shorts.db import Store
+from social2shorts.discover import discover_tiktok
+from social2shorts.discover import download_reference as _download_reference
+from social2shorts.ingest import PhoneSource, ingest_originals
+from social2shorts.models import CatalogEntry, ItemStatus, Original, ShortMeta
+from social2shorts.phash import phash_file as _phash_file
 
 AUTH_ALERT = "OAuth token refresh failed — run paused; re-authenticate."
 DEFAULT_TITLE = "Moto ride"
