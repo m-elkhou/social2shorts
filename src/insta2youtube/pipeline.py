@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from insta2youtube import audio_gate, curate, enrich, match, transcode, youtube_upload
+from insta2youtube import audio_gate, contentid, curate, enrich, match, transcode, youtube_upload
 from insta2youtube.config import Settings
 from insta2youtube.db import Store
 from insta2youtube.discover import discover_tiktok
@@ -128,6 +128,19 @@ def run_backlog(
                         except OSError:
                             pass
                 vid = deps.upload(out, meta, privacy)
+
+                # Content-ID guard
+                service = youtube_upload.build_service()
+                contentid.guard_after_upload(
+                    vid,
+                    on_claim=lambda reason: (
+                        store.add_review(sid, f"Content-ID claim: {reason}"),
+                        store.set_status(sid, ItemStatus.review_audio),
+                        report.review.append(sid)
+                    ),
+                    service=service
+                )
+
                 store.mark_uploaded(fp, sid, vid)
                 store.set_status(sid, ItemStatus.uploaded)
                 report.uploaded.append({"source_id": sid, "youtube_id": vid})
