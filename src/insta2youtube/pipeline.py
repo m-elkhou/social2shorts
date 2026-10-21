@@ -60,6 +60,36 @@ def _fallback_title(caption: str) -> str:
     return text or DEFAULT_TITLE
 
 
+def run_continuous(
+    settings: Settings,
+    phone: PhoneSource,
+    deps: PipelineDeps,
+    limit: int,
+    privacy: str = "unlisted",
+) -> RunReport:
+    """
+    Discover new posts, process only unseen ones (vs ledger), and update status.
+    """
+    store = Store(settings.db_path)
+    store.init_schema()
+
+    all_entries = deps.discover()
+    new_entries = []
+    for e in all_entries:
+        fp = store.fingerprint(e)
+        if not store.is_uploaded(fp):
+            new_entries.append(e)
+
+    # Temporarily swap deps.discover to return only new entries
+    old_discover = deps.discover
+    deps.discover = lambda: new_entries
+
+    try:
+        return run_backlog(settings, phone, deps, limit, privacy)
+    finally:
+        deps.discover = old_discover
+
+
 def run_backlog(
     settings: Settings,
     phone: PhoneSource,

@@ -14,7 +14,7 @@ from insta2youtube.db import Store
 from insta2youtube.discover import discover_tiktok
 from insta2youtube.ingest import MtpPhoneSource, ingest_originals
 from insta2youtube.models import ItemStatus
-from insta2youtube.pipeline import PipelineDeps, run_backlog
+from insta2youtube.pipeline import PipelineDeps, run_backlog, run_continuous
 
 app = typer.Typer(help="Republish curated TikTok videos as YouTube Shorts.", no_args_is_help=True)
 console = Console()
@@ -96,6 +96,34 @@ def ingest(limit: Optional[int] = typer.Option(None, "--limit"), config: str = C
     for o in originals:
         table.add_row(o.path, f"{o.duration:.1f}s")
     console.print(table)
+
+
+@app.command()
+def run_continuous(
+    limit: int = typer.Option(3, "--limit"),
+    privacy: Optional[Privacy] = typer.Option(
+        None, "--privacy", help="Default: default_privacy from config."
+    ),
+    config: str = ConfigOpt,
+) -> None:
+    """Run the continuous pipeline (discover only unseen)."""
+    settings = load_config(config)
+    phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
+    deps = PipelineDeps.default(settings)
+    report = run_continuous(
+        settings, phone, deps, limit, privacy.value if privacy else settings.default_privacy
+    )
+    table = Table(title="Continuous run report")
+    table.add_column("bucket")
+    table.add_column("count")
+    table.add_column("items")
+    for name in ("uploaded", "review", "pending", "skipped"):
+        items = getattr(report, name)
+        shown = ", ".join(str(i["source_id"] if isinstance(i, dict) else i) for i in items)
+        table.add_row(name, str(len(items)), shown)
+    console.print(table)
+    if report.alert:
+        console.print(f"[bold red]ALERT:[/bold red] {report.alert}")
 
 
 @app.command()
