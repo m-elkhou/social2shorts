@@ -1,3 +1,9 @@
+"""
+Command-line interface for social2shorts.
+
+This module provides the Typer-based CLI for discovering, curating,
+ingesting, and running the social-to-shorts pipeline.
+"""
 from __future__ import annotations
 
 from enum import Enum
@@ -14,7 +20,7 @@ from social2shorts.db import Store
 from social2shorts.discover import discover_tiktok
 from social2shorts.ingest import MtpPhoneSource, ingest_originals
 from social2shorts.models import ItemStatus
-from social2shorts.pipeline import PipelineDeps, run_backlog, run_continuous
+from social2shorts.pipeline import PipelineDeps, run_backlog, run_continuous, execute_top_pipeline
 
 app = typer.Typer(help="Republish curated TikTok videos as YouTube Shorts.", no_args_is_help=True)
 console = Console()
@@ -23,6 +29,9 @@ CLIENT_SECRETS = "secrets/client_secret.json"
 TOKEN_PATH = "secrets/token.json"
 
 class Privacy(str, Enum):
+    """
+    YouTube privacy settings.
+    """
     public = "public"
     unlisted = "unlisted"
     private = "private"
@@ -32,13 +41,39 @@ class _LimitedPhone:
     """Wraps a PhoneSource so only the first N videos are listed (and copied)."""
 
     def __init__(self, inner, limit: int):
+        """
+        Initialize the limited phone wrapper.
+
+        Args:
+            inner: The inner PhoneSource.
+            limit (int): Maximum number of videos to list.
+        """
         self.inner = inner
         self.limit = limit
 
     def list_videos(self, folders):
+        """
+        List videos, limited to the specified count.
+
+        Args:
+            folders (list[str]): Folders to search.
+
+        Returns:
+            list[PhoneVideo]: Truncated list of videos.
+        """
         return self.inner.list_videos(folders)[: self.limit]
 
     def copy(self, name, dest_dir):
+        """
+        Copy a video by name.
+
+        Args:
+            name (str): Filename to copy.
+            dest_dir (str): Destination directory.
+
+        Returns:
+            str: Path to the copied file.
+        """
         return self.inner.copy(name, dest_dir)
 
 
@@ -46,6 +81,15 @@ ConfigOpt = typer.Option("config.toml", "-c", "--config", help="Path to config T
 
 
 def _store(settings: Settings) -> Store:
+    """
+    Initialize the database store.
+
+    Args:
+        settings (Settings): Application settings.
+
+    Returns:
+        Store: Initialized Store instance.
+    """
     store = Store(settings.db_path)
     store.init_schema()
     return store
@@ -53,14 +97,24 @@ def _store(settings: Settings) -> Store:
 
 @app.command()
 def auth() -> None:
-    """Run the OAuth consent flow once and store the token."""
+    """
+    Run the OAuth consent flow once and store the token.
+
+    This opens a browser for YouTube API authorization.
+    """
     youtube_upload.get_credentials(CLIENT_SECRETS, TOKEN_PATH)
     console.print("[green]YouTube authorization OK; token stored.[/green]")
 
 
 @app.command()
 def discover(limit: Optional[int] = typer.Option(None, "--limit"), config: str = ConfigOpt) -> None:
-    """Discover TikTok videos and upsert them into the catalog."""
+    """
+    Discover TikTok videos and upsert them into the catalog.
+
+    Args:
+        limit (Optional[int]): Max number of videos to discover.
+        config (str): Path to config TOML.
+    """
     settings = load_config(config)
     store = _store(settings)
     entries = discover_tiktok(settings.tiktok_profile_url, limit)
@@ -71,7 +125,12 @@ def discover(limit: Optional[int] = typer.Option(None, "--limit"), config: str =
 
 @app.command()
 def curate(config: str = ConfigOpt) -> None:
-    """Show the curated shortlist."""
+    """
+    Show the curated shortlist.
+
+    Args:
+        config (str): Path to config TOML.
+    """
     settings = load_config(config)
     shortlist = curate_mod.curate(_store(settings).all_catalog(), settings)
     table = Table(title=f"Shortlist ({len(shortlist)})")
@@ -84,7 +143,13 @@ def curate(config: str = ConfigOpt) -> None:
 
 @app.command()
 def ingest(limit: Optional[int] = typer.Option(None, "--limit"), config: str = ConfigOpt) -> None:
-    """Copy originals off the phone into originals_dir."""
+    """
+    Copy originals off the phone into originals_dir.
+
+    Args:
+        limit (Optional[int]): Max number of videos to ingest.
+        config (str): Path to config TOML.
+    """
     settings = load_config(config)
     phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
     if limit is not None:
@@ -106,7 +171,14 @@ def run_continuous(
     ),
     config: str = ConfigOpt,
 ) -> None:
-    """Run the continuous pipeline (discover only unseen)."""
+    """
+    Run the continuous pipeline (discover only unseen).
+
+    Args:
+        limit (int): Max videos to upload.
+        privacy (Optional[Privacy]): YouTube privacy setting.
+        config (str): Path to config TOML.
+    """
     settings = load_config(config)
     phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
     deps = PipelineDeps.default(settings)
@@ -134,7 +206,14 @@ def run(
     ),
     config: str = ConfigOpt,
 ) -> None:
-    """Run the backlog pipeline end to end."""
+    """
+    Run the backlog pipeline end to end.
+
+    Args:
+        limit (int): Max videos to upload.
+        privacy (Optional[Privacy]): YouTube privacy setting.
+        config (str): Path to config TOML.
+    """
     settings = load_config(config)
     phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
     deps = PipelineDeps.default(settings)
@@ -159,7 +238,13 @@ def review(
     approve: Optional[str] = typer.Option(None, "--approve", help="source_id to mark ready."),
     config: str = ConfigOpt,
 ) -> None:
-    """List the review queue; optionally approve an item."""
+    """
+    List the review queue; optionally approve an item.
+
+    Args:
+        approve (Optional[str]): The source_id to approve.
+        config (str): Path to config TOML.
+    """
     store = _store(load_config(config))
     if approve:
         known = {e.source_id for e in store.all_catalog()} | {r["source_id"] for r in store.reviews()}
@@ -185,7 +270,14 @@ def publish(
     privacy: Privacy = typer.Option(Privacy.public, "--privacy"),
     config: str = ConfigOpt,
 ) -> None:
-    """Flip uploaded video(s) to the given privacy."""
+    """
+    Flip uploaded video(s) to the given privacy.
+
+    Args:
+        target (str): source_id or "all".
+        privacy (Privacy): Target privacy.
+        config (str): Path to config TOML.
+    """
     store = _store(load_config(config))
     rows = store.ledger()
     if target != "all":
@@ -209,7 +301,12 @@ def publish(
 
 @app.command()
 def status(config: str = ConfigOpt) -> None:
-    """Show catalog counts by status."""
+    """
+    Show catalog counts by status.
+
+    Args:
+        config (str): Path to config TOML.
+    """
     counts = _store(load_config(config)).status_counts()
     table = Table(title="Catalog status")
     table.add_column("status")
@@ -217,6 +314,46 @@ def status(config: str = ConfigOpt) -> None:
     for s in ItemStatus:
         table.add_row(s.value, str(counts.get(s.value, 0)))
     console.print(table)
+
+
+
+@app.command()
+def run_top(
+    limit: int = typer.Option(10, '--limit', help='Max number of top videos to upload.'),
+    privacy: Optional[Privacy] = typer.Option(
+        None, '--privacy', help='Default: default_privacy from config.'
+    ),
+    config: str = ConfigOpt,
+) -> None:
+    """
+    Automatically process and upload the top N most engaging videos across all platforms.
+
+    Args:
+        limit (int): Number of top videos to target.
+        privacy (Optional[Privacy]): YouTube privacy setting.
+        config (str): Path to config TOML.
+    """
+    settings = load_config(config)
+    phone = MtpPhoneSource(settings.phone_name_match, folders=settings.phone_video_folders)
+    deps = PipelineDeps.default(settings)
+    
+    console.print(f'[bold blue]Launching Top {limit} Pipeline...[/bold blue]')
+    
+    report = execute_top_pipeline(
+        settings, phone, deps, limit, privacy.value if privacy else settings.default_privacy
+    )
+    
+    table = Table(title=f'Top {limit} Run Report')
+    table.add_column('bucket')
+    table.add_column('count')
+    table.add_column('items')
+    for name in ('uploaded', 'review', 'pending', 'skipped'):
+        items = getattr(report, name)
+        shown = ', '.join(str(i['source_id'] if isinstance(i, dict) else i) for i in items)
+        table.add_row(name, str(len(items)), shown)
+    console.print(table)
+    if report.alert:
+        console.print(f'[bold red]ALERT:[/bold red] {report.alert}')
 
 
 if __name__ == "__main__":
