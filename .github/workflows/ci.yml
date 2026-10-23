@@ -16,6 +16,7 @@ permissions:
 jobs:
   lint:
     name: Lint
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,11 +31,11 @@ jobs:
 
   test:
     name: Unit tests
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
+      # Unit tests never call ffmpeg (those are marked integration), so no apt step here.
       - uses: actions/checkout@v4
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -53,12 +54,21 @@ jobs:
 
   integration:
     name: Integration tests (ffmpeg)
+    timeout-minutes: 25
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      # Static build from GitHub releases: seconds to fetch (the Ubuntu mirror can stall for
+      # minutes) and close to the recent ffmpeg a Windows user installs.
+      - name: Install ffmpeg (static build)
+        timeout-minutes: 5
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ffmpeg-master-latest-linux64-gpl/bin" >> "$GITHUB_PATH"
+      - run: ffmpeg -hide_banner -version | head -1
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -68,6 +78,7 @@ jobs:
 
   windows-smoke:
     name: Windows smoke
+    timeout-minutes: 25
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,6 +93,7 @@ jobs:
 
   docs:
     name: Docs build
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
