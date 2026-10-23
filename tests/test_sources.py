@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from social2shorts.db import Store
-from social2shorts.models import Platform
 from social2shorts.media import sha256_file
+from social2shorts.models import Platform
 from social2shorts.sources.inbox import SETTLE_S, scan_inbox
 from social2shorts.sources.phone import (
     FileNotOnPhone,

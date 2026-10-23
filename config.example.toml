@@ -31,7 +31,9 @@ upload_cost_units = 1600
 max_uploads_per_day = 100       # per-project videos.insert cap (whichever limit hits first)
 made_for_kids = false
 contains_synthetic_media = false  # set true if the montage adds realistic AI-generated content
-# language = "fr"               # sets defaultLanguage/defaultAudioLanguage + whisper language
+# language = "fr"               # fr | en | ar: sets defaultLanguage/defaultAudioLanguage and the
+                                # whisper language. Unset: CTA lines and fallback titles are in
+                                # French (the audience is mostly francophone Morocco).
 
 [schedule]                      # used with --privacy scheduled
 timezone = "Africa/Casablanca"

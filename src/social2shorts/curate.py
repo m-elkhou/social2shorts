@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from social2shorts.db import catalog_fingerprint
+from social2shorts.db import catalog_fingerprint, normalize_caption
 from social2shorts.models import CatalogEntry, Platform
 
 SWEET_SPOT_S = (15.0, 60.0)
@@ -31,14 +31,23 @@ def is_eligible(e: CatalogEntry, min_duration_s: float, exclude_no_duration: boo
 
 
 def dedupe(entries: list[CatalogEntry], prefer: Platform) -> list[CatalogEntry]:
-    """Keep one entry per cross-platform fingerprint, preferring ``prefer``'s copy."""
-    kept: dict[str, CatalogEntry] = {}
+    """Soft cross-platform dedupe: same caption + duration on two platforms -> keep ``prefer``'s.
+
+    Only a hint to save work: posts on the same platform, or with no words in their caption
+    (emoji-only), are never merged. The real guard is the source-file hash at upload time.
+    """
+    kept: list[CatalogEntry] = []
+    index: dict[str, int] = {}
     for e in entries:
-        fp = catalog_fingerprint(e)
-        current = kept.get(fp)
-        if current is None or (e.platform is prefer and current.platform is not prefer):
-            kept[fp] = e
-    return list(kept.values())
+        fp = catalog_fingerprint(e) if normalize_caption(e.caption) else None
+        i = index.get(fp) if fp else None
+        if i is None or kept[i].platform is e.platform:
+            if fp and i is None:
+                index[fp] = len(kept)
+            kept.append(e)
+        elif e.platform is prefer:
+            kept[i] = e
+    return kept
 
 
 def curate(

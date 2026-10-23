@@ -65,7 +65,12 @@ def test_uploads_ledger_and_quota(tmp_path):
     s.record_upload(Upload(youtube_id="y", item_key="A", fingerprint="fp", privacy="private",
                            content_sha256="sha", publish_at=at, uploaded_at=at,
                            quota_units=1600))  # fmt: skip
-    assert s.has_upload("A") and s.is_content_uploaded("sha") and not s.is_legacy_uploaded("fp") and s.publish_times() == [at]
+    assert (
+        s.has_upload("A")
+        and s.is_content_uploaded("sha")
+        and not s.is_legacy_uploaded("fp")
+        and s.publish_times() == [at]
+    )
     s.set_upload_privacy("y", "public")
     assert s.uploads()[0].privacy == "public" and s.publish_times() == []
     s.spend_quota("2026-10-23", 1600, uploads=1)
