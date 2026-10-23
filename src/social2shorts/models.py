@@ -1,57 +1,65 @@
-"""
-Data models for social2shorts.
+"""Domain models shared by every stage: catalog posts, work items, matches and metadata."""
 
-This module defines the Pydantic models and Enums used throughout the pipeline
-to represent catalog entries, original videos, match results, and metadata.
-"""
 from __future__ import annotations
 
-from enum import Enum
+from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class Platform(str, Enum):
-    """
-    Supported social media platforms.
-    """
+class Platform(StrEnum):
+    """Social platforms the catalog is discovered from."""
+
     tiktok = "tiktok"
     instagram = "instagram"
 
 
-class ItemStatus(str, Enum):
-    """
-    Statuses for a video in the processing pipeline.
-    """
+class SourceKind(StrEnum):
+    """Where a work item comes from."""
+
+    catalog = "catalog"  # already-published reel, rendered from the phone original
+    raw = "raw"  # never-published footage dropped in the inbox folder
+
+
+class Privacy(StrEnum):
+    """Upload visibility. ``scheduled`` = private now, public at the next free publish slot."""
+
+    public = "public"
+    unlisted = "unlisted"
+    private = "private"
+    scheduled = "scheduled"
+
+
+class ItemStatus(StrEnum):
+    """Lifecycle of a work item."""
+
     discovered = "discovered"
-    curated = "curated"
-    pending_original = "pending_original"
+    pending_original = "pending_original"  # no phone original matched yet (retried each run)
     matched = "matched"
-    ambiguous = "ambiguous"
-    review_audio = "review_audio"
-    ready = "ready"
+    ambiguous = "ambiguous"  # several originals match: a human must pick one
+    review_audio = "review_audio"  # licensed music: a human must approve
+    ready = "ready"  # approved by a human: processed first on the next run
+    failed = "failed"  # processing error: retried until MAX_ATTEMPTS, then reviewed
+    rendered = "rendered"  # dry run output only
     uploaded = "uploaded"
-    skipped = "skipped"
+    duplicate = "duplicate"  # same content already uploaded (e.g. the TikTok copy of an IG post)
+    claimed = "claimed"  # uploaded, then flagged by the Content-ID guard
+    rejected = "rejected"  # a human said no: never processed again
+
+
+class ReviewKind(StrEnum):
+    """Why an item is waiting for a human."""
+
+    audio = "audio"
+    ambiguous = "ambiguous"
+    error = "error"
+    claim = "claim"
 
 
 class CatalogEntry(BaseModel):
-    """
-    Information about a video discovered on a social platform.
+    """A post discovered on TikTok or Instagram."""
 
-    Attributes:
-        platform (Platform): The platform where the video was found.
-        source_id (str): The platform-specific ID of the video.
-        url (str): URL to the video.
-        caption (str): The original caption.
-        duration (float): Video duration in seconds.
-        view_count (int): Number of views.
-        like_count (int): Number of likes.
-        comment_count (int): Number of comments.
-        upload_date (str): The upload date string.
-        track (str): The track name.
-        artist (str): The artist name.
-        raw (dict): Raw info dictionary from yt-dlp.
-    """
     platform: Platform
     source_id: str
     url: str
@@ -67,54 +75,93 @@ class CatalogEntry(BaseModel):
 
     @property
     def is_original_audio(self) -> bool:
-        """
-        Check if the video uses original audio.
+        """True when the post uses its own sound (no licensed track)."""
+        return self.track.strip().lower() in {"", "original sound", "son original"}
 
-        Returns:
-            bool: True if the track is empty or "original sound".
-        """
-        return self.track.strip().lower() in {"", "original sound"}
+
+class Item(BaseModel):
+    """One video to turn into a Short, whatever its source.
+
+    Attributes:
+        key: Stable id (catalog: platform post id; raw: ``raw-<sha256 prefix>``).
+        kind: Source kind, selects the preparation strategy.
+        fingerprint: Upload dedupe key (caption+duration hash, or file sha256).
+        status: Current lifecycle status.
+        source_path: File to render, once known (raw file or chosen phone original).
+        attempts: Failed processing attempts so far.
+        entry: Catalog metadata (catalog items only).
+    """
+
+    key: str
+    kind: SourceKind
+    fingerprint: str
+    status: ItemStatus = ItemStatus.discovered
+    source_path: str | None = None
+    attempts: int = 0
+    entry: CatalogEntry | None = None
+
+    @property
+    def caption(self) -> str:
+        """Original caption, empty for raw footage."""
+        return self.entry.caption if self.entry else ""
 
 
 class Original(BaseModel):
-    """
-    Represents a high-quality original video file.
+    """A high-quality original video file on local disk."""
 
-    Attributes:
-        path (str): Path to the local file.
-        duration (float): Video duration in seconds.
-        phashes (list[str]): List of perceptual hashes for the video.
-    """
     path: str
     duration: float
     phashes: list[str] = Field(default_factory=list)
 
 
 class MatchResult(BaseModel):
-    """
-    The result of matching a catalog entry to an original video.
+    """Outcome of matching a catalog post to the phone originals."""
 
-    Attributes:
-        source_id (str): The ID of the source video.
-        original_path (str | None): Path to the matched original file, or None.
-        confidence (float): Match confidence score (0.0 to 1.0).
-        status (ItemStatus): The resulting status (e.g., matched, ambiguous).
-    """
     source_id: str
     original_path: str | None
     confidence: float
     status: ItemStatus
+    candidates: list[str] = Field(default_factory=list)
 
 
 class ShortMeta(BaseModel):
-    """
-    YouTube Shorts metadata.
+    """YouTube metadata for one Short.
 
     Attributes:
-        title (str): The video title.
-        description (str): The video description.
-        tags (list[str]): A list of tags.
+        title: Video title (<= 100 chars).
+        description: Video description (``#Shorts`` is appended at upload).
+        tags: Content-derived tags.
+        hook: Punchy on-screen line for the first seconds (<= 40 chars).
     """
+
     title: str
     description: str
     tags: list[str] = Field(default_factory=list)
+    hook: str = ""
+
+
+class Upload(BaseModel):
+    """One video uploaded to YouTube (the anti-duplicate ledger row)."""
+
+    youtube_id: str
+    item_key: str
+    fingerprint: str
+    privacy: str
+    publish_at: datetime | None = None
+    uploaded_at: datetime
+    quota_units: int = 0
+
+
+class UploadResult(BaseModel):
+    """What YouTube actually applied to a new upload (may differ from what was asked)."""
+
+    video_id: str
+    privacy: str
+    publish_at: datetime | None = None
+
+
+class Claim(BaseModel):
+    """A post-upload problem reported by the YouTube Data API."""
+
+    video_id: str
+    reason: str

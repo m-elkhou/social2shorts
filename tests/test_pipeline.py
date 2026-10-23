@@ -1,141 +1,238 @@
-from social2shorts.enrich import Segment
-from social2shorts.config import Settings
-from social2shorts.ingest import FakePhoneSource
-from social2shorts.models import CatalogEntry, Original, Platform, ShortMeta
-from social2shorts.pipeline import PipelineDeps, run_backlog
-from social2shorts.youtube_upload import AuthRefreshError
+from datetime import UTC, datetime
+from pathlib import Path
+
+from fakes import FakeLLM, entry
+
+from social2shorts import operations
+from social2shorts.db import Store
+from social2shorts.models import Claim, ItemStatus, Privacy
+from social2shorts.montage.types import MontageMode
+from social2shorts.pipeline import (
+    MAX_ATTEMPTS,
+    RunOptions,
+    SourceChoice,
+    run_pipeline,
+)
+from social2shorts.publish.youtube import AuthRefreshError, QuotaExceededError
+
+CATALOG = RunOptions(source=SourceChoice.catalog, limit=10)
 
 
-def _e(sid, dur, track="original sound"):
-    return CatalogEntry(platform=Platform.tiktok, source_id=sid, url=f"http://x/{sid}",
-                        caption=f"cap {sid}", duration=dur, view_count=1000,
-                        like_count=10, comment_count=1, upload_date="20260101",
-                        track=track, artist="")
+def _store(settings) -> Store:
+    return Store(settings.db_path)
 
 
-ENTRIES = [_e("A", 20.0), _e("B", 30.0, track="Some Song"), _e("C", 40.0)]
+def _raw(settings, name: str, content: bytes) -> Path:
+    inbox = Path(settings.sources.inbox_dir)
+    inbox.mkdir(parents=True, exist_ok=True)
+    path = inbox / name
+    path.write_bytes(content)
+    return path
 
 
-def _settings(tmp_path):
-    return Settings(tiktok_profile_url="u", youtube_handle="h",
-                    originals_dir=str(tmp_path / "o"), work_dir=str(tmp_path / "w"),
-                    db_path=str(tmp_path / "db.sqlite"), phone_video_folders=["F"])
+def test_catalog_routes_and_is_idempotent(settings, deps):
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["A"]
+    assert r.review == ["B"] and r.pending == ["C"]
+    store = _store(settings)
+    assert store.item("B").status is ItemStatus.review_audio
+    assert store.review("B")["kind"] == "audio"
+
+    r2 = run_pipeline(settings, deps, CATALOG)
+    assert r2.uploaded == [] and len(deps.platform.uploads) == 1
+    assert r2.review == [] and r2.pending == ["C"]  # B waits for a human, C keeps waiting
 
 
-def _deps(upload=None, title="T"):
-    return PipelineDeps(
-        discover=lambda: list(ENTRIES),
-        download_reference=lambda url, wd: f"/ref/{url.rsplit('/', 1)[-1]}.mp4",
-        ingest=lambda s, f, d: [Original(path="/orig/A.mp4", duration=20.0)],
-        phash_file=lambda p, n: ["ffff0000"] if p in ("/ref/A.mp4", "/orig/A.mp4") else ["00000000"],
-        transcribe=lambda p: [],
-        generate_meta=lambda e, t: ShortMeta(title=title, description="d", tags=[]),
-        upload=upload or (lambda v, m, p: "yt123"),
-        transcode=lambda s, d, a: d,
-    )
+def test_catalog_uses_polish_mode_hook_and_words(settings, deps):
+    run_pipeline(settings, deps, CATALOG)
+    call = deps.renderer.calls[0]
+    assert call["mode"] is MontageMode.polish and call["hook"] == "Wait for the turn"
+    assert call["words"][0].text == "salut"
+    meta = deps.platform.uploads[0]["meta"]
+    assert meta.title == "Late ride by the sea" and meta.hook == "Wait for the turn"
 
 
-def test_backlog_routes_and_is_idempotent(tmp_path):
-    s = _settings(tmp_path)
-    phone = FakePhoneSource({})
-    r = run_backlog(s, phone, _deps(), limit=10)
-    assert len(r.uploaded) == 1 and len(r.review) == 1 and len(r.pending) == 1
-    r2 = run_backlog(s, phone, _deps(), limit=10)
-    assert len(r2.uploaded) == 0 and r2.skipped == ["A"]
+def test_reference_downloaded_once_for_pending_posts(settings, deps):
+    run_pipeline(settings, deps, CATALOG)
+    run_pipeline(settings, deps, CATALOG)
+    assert deps.catalog.downloads.count("http://x/C") == 1
+    assert not list((Path(settings.work_dir) / "refs").glob("*"))  # references cleaned up
 
 
-def _multi(n_match):
-    """Entries A1..An all match an original each; A1 has most views (processed first)."""
-    ents, origs = [], []
-    for k in range(n_match):
-        sid = f"M{k}"
-        ents.append(_e(sid, 20.0 + 3 * k).model_copy(update={"view_count": 100000 - k}))
-        origs.append(Original(path=f"/orig/{sid}.mp4", duration=20.0 + 3 * k))
-    return ents, origs
+def test_raw_path_highlight_and_content_dedupe(settings, deps):
+    _raw(settings, "a.mp4", b"clip-1")
+    _raw(settings, "copy-of-a.mp4", b"clip-1")
+    _raw(settings, "b.mov", b"clip-2")
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw, limit=10))
+    assert len(r.uploaded) == 2
+    assert {c["mode"] for c in deps.renderer.calls} == {MontageMode.highlight}
+    assert run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw)).uploaded == []
 
 
-def _deps_multi(ents, origs, upload):
-    d = _deps(upload=upload)
-    d.discover = lambda: list(ents)
-    d.ingest = lambda s, f, dd: list(origs)
-    # distinct deterministic hashes per id; refs and originals share the id
-    d.phash_file = lambda p, n: [{"M0": "00000000", "M1": "ffffffff", "M2": "ffff0000"}.get(
-        p.rsplit("/", 1)[-1].split(".")[0], "0f0f0f0f")]
-    return d
+def test_all_sources_interleave(settings, deps):
+    _raw(settings, "a.mp4", b"clip-1")
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.all, limit=2))
+    keys = [u.item_key for u in r.uploaded]
+    assert keys[0] == "A" and keys[1].startswith("raw-")
 
 
-def test_limit_caps_uploads(tmp_path):
-    ents, origs = _multi(3)
-    calls = []
-    d = _deps_multi(ents, origs, lambda v, m, p: calls.append(v) or "id")
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), d, limit=1)
-    assert len(r.uploaded) == 1 and len(calls) == 1
-    assert r.pending == [] and r.review == [] and r.skipped == []
+def test_dry_run_renders_without_youtube(settings, deps):
+    deps.platform.upload_error = AssertionError("must not upload")
+    deps.platform.claims_error = AssertionError("must not call YouTube")
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, dry_run=True))
+    assert r.rendered == ["A"] and r.alert is None
+    assert _store(settings).item("A").status is ItemStatus.rendered
+    assert (Path(settings.work_dir) / "renders" / "A.mp4").exists()
 
 
-def test_auth_refresh_error_stops_run(tmp_path):
-    ents, origs = _multi(3)
-
-    def boom(v, m, p):
-        raise AuthRefreshError("x")
-
-    d = _deps_multi(ents, origs, boom)
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), d, limit=10)
-    assert r.alert and not r.uploaded
-    assert r.review == [] and r.pending == [] and r.skipped == []
+def test_ledger_written_before_guard(settings, deps):
+    deps.platform.claims_error = RuntimeError("API down")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.youtube_id for u in r.uploaded] == ["yt1"]
+    assert _store(settings).uploads()[0].youtube_id == "yt1"
+    run_pipeline(settings, deps, CATALOG)
+    assert len(deps.platform.uploads) == 1  # never re-uploaded
 
 
-def test_empty_title_replaced(tmp_path):
-    seen = []
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}),
-                    _deps(title="  ", upload=lambda v, m, p: seen.append(m.title) or "id"), limit=10)
-    assert seen == ["cap A"] and len(r.uploaded) == 1
+def test_claim_makes_video_private_and_queues_review(settings, deps):
+    deps.platform.claims = [Claim(video_id="yt1", reason="blocked in 3 countries")]
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.claimed == ["A"] and deps.platform.privacy_changes == [("yt1", "private")]
+    store = _store(settings)
+    assert store.item("A").status is ItemStatus.claimed
+    assert store.review("A")["kind"] == "claim"
+    assert store.uploads()[0].privacy == "private"
 
 
-def test_item_error_isolated_and_loop_continues(tmp_path):
-    # order by views: A (1000 views) ... all equal views -> stable order A, B, C
-    d = _deps()
-
-    def flaky(p):
-        raise ZeroDivisionError("boom")
-
-    d.transcribe = flaky
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), d, limit=10)
-    assert not r.uploaded and r.alert is None
-    assert "A" in r.review and "B" in r.review      # A failed, B licensed
-    assert r.pending == ["C"]                       # later entry still processed
-    from social2shorts.db import Store
-    reasons = [x["reason"] for x in Store(str(tmp_path / "db.sqlite")).reviews()]
-    assert any(x.startswith("processing error: ZeroDivisionError: boom") for x in reasons)
+def test_recent_uploads_rechecked_next_run(settings, deps):
+    run_pipeline(settings, deps, CATALOG)
+    deps.platform.claims = [Claim(video_id="yt1", reason="claimed as licensed content")]
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.claimed == ["A"]
 
 
-def test_db_error_on_one_entry_does_not_abort(tmp_path, monkeypatch):
-    from social2shorts.db import Store
-    orig = Store.is_uploaded
-    monkeypatch.setattr(Store, "is_uploaded",
-                        lambda self, fp: (_ for _ in ()).throw(RuntimeError("db")) if self._n(fp) else orig(self, fp))
-    calls = {"n": 0}
-
-    def _n(self, fp):
-        calls["n"] += 1
-        return calls["n"] == 1
-
-    monkeypatch.setattr(Store, "_n", _n, raising=False)
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), _deps(), limit=10)
-    assert len(r.review) >= 1 and r.alert is None
+def test_quota_exhaustion_stops_cleanly(settings, deps):
+    settings.youtube.daily_quota_units = 2000  # room for one upload (+ guard calls)
+    _raw(settings, "a.mp4", b"1")
+    _raw(settings, "b.mp4", b"2")
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw, limit=None))
+    assert len(r.uploaded) == 1 and "quota" in r.stop_reason
+    assert len(deps.renderer.calls) == 1  # did not render what it cannot upload
 
 
-def test_ass_file_removed_after_transcode(tmp_path):
-    import dataclasses
-    import os
-    seen = []
+def test_max_uploads_per_day_cap(settings, deps):
+    settings.youtube.max_uploads_per_day = 1
+    _raw(settings, "a.mp4", b"1")
+    _raw(settings, "b.mp4", b"2")
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw, limit=None))
+    assert len(r.uploaded) == 1 and "1/1 uploads" in r.stop_reason
 
-    def tc(src, dst, ass):
-        seen.append((ass, ass is not None and os.path.exists(ass)))
-        return dst
 
-    deps = dataclasses.replace(_deps(), transcribe=lambda p: [Segment(0.0, 1.0, "hi")], transcode=tc)
-    r = run_backlog(_settings(tmp_path), FakePhoneSource({}), deps, limit=10)
+def test_youtube_quota_error_stops_and_exhausts_day(settings, deps):
+    deps.platform.upload_error = QuotaExceededError("quotaExceeded")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.uploaded == [] and "quota" in r.stop_reason
+    assert _store(settings).quota_used("2026-10-23")[0] == settings.youtube.daily_quota_units
+
+
+def test_auth_failure_alerts_and_stops(settings, deps):
+    deps.platform.claims_error = AuthRefreshError("invalid_grant")
+    run_pipeline(settings, deps, CATALOG)  # nothing uploaded yet: sweep is a no-op
+    deps.platform.upload_error = AuthRefreshError("invalid_grant")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.alert and "social2shorts auth" in r.alert
+    assert _store(settings).open_alerts()
+
+
+def test_scheduled_privacy_uses_free_slots(settings, deps):
+    settings.schedule.timezone = "Europe/Paris"
+    _raw(settings, "a.mp4", b"1")
+    _raw(settings, "b.mp4", b"2")
+    opts = RunOptions(source=SourceChoice.raw, limit=2, privacy=Privacy.scheduled)
+    r = run_pipeline(settings, deps, opts)
+    # NOW = 09:00 UTC = 11:00 Paris (CEST): slots 12:00 and 18:00 local today
+    assert [u.publish_at for u in r.uploaded] == [
+        datetime(2026, 10, 23, 10, 0, tzinfo=UTC),
+        datetime(2026, 10, 23, 16, 0, tzinfo=UTC),
+    ]
+    assert {u["privacy"] for u in deps.platform.uploads} == {"private"}
+
+
+def test_private_lock_stores_actual_privacy(settings, deps, caplog):
+    deps.platform.force_privacy = "private"
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.uploaded[0].privacy == "private"
+    assert _store(settings).uploads()[0].privacy == "private"
+    assert "locked to private" in caplog.text
+
+
+def test_llm_failure_falls_back_and_still_uploads(settings, deps):
+    deps.llm = FakeLLM(error=RuntimeError("429"))
+    r = run_pipeline(settings, deps, CATALOG)
     assert len(r.uploaded) == 1
-    ass, existed = seen[0]
-    assert ass and existed and not os.path.exists(ass)
+    assert deps.platform.uploads[0]["meta"].title == "cap A"
+
+
+def test_failures_retry_then_go_to_review(settings, deps):
+    deps.transcriber.transcribe = lambda path: 1 / 0
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        r = run_pipeline(settings, deps, CATALOG)
+        bucket = r.review if attempt == MAX_ATTEMPTS else r.failed
+        assert "A" in bucket
+    store = _store(settings)
+    assert store.item("A").status is ItemStatus.failed and store.review("A")["kind"] == "error"
+    assert "A" not in run_pipeline(settings, deps, CATALOG).failed  # no longer retried
+
+
+def test_approval_of_licensed_audio_processes_next_run(settings, deps):
+    run_pipeline(settings, deps, CATALOG)
+    operations.approve(_store(settings), "B")
+    deps.media.durations["B"] = 30.0
+    deps.media.hashes["B"] = "00ff00ff"
+    (Path(settings.originals_dir) / "B.mp4").write_bytes(b"original B")
+    deps.originals.paths.append(Path(settings.originals_dir) / "B.mp4")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["B"]
+
+
+def test_ambiguous_match_resolved_by_human(settings, deps):
+    orig = Path(settings.originals_dir)
+    (orig / "A2.mp4").write_bytes(b"twin")
+    deps.originals.paths.append(orig / "A2.mp4")
+    deps.media.durations["A2"] = 20.3
+    deps.media.hashes["A2"] = "ffff0001"
+    r = run_pipeline(settings, deps, CATALOG)
+    assert "A" in r.review and r.uploaded == []
+    store = _store(settings)
+    assert len(store.match_candidates("A")) == 2
+
+    operations.approve(store, "A", orig / "A2.mp4")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["A"]
+    assert deps.renderer.calls[-1]["src"] == orig / "A2.mp4"
+
+
+def test_cross_platform_duplicate_skipped(settings, deps):
+    deps.catalog.entries = [
+        entry("A", 20.0, caption="Road trip!"),
+        entry("IG1", 20.4, caption="ROAD TRIP", platform="instagram", view_count=99999),
+    ]
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["A"]  # TikTok copy preferred despite views
+    assert "IG1" not in r.skipped + r.pending
+
+
+def test_limit_caps_uploads(settings, deps):
+    _raw(settings, "a.mp4", b"1")
+    _raw(settings, "b.mp4", b"2")
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw, limit=1))
+    assert len(r.uploaded) == 1
+
+
+def test_missing_raw_file_counts_as_failure(settings, deps):
+    path = _raw(settings, "a.mp4", b"1")
+    run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw, dry_run=True))
+    path.unlink()
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw))
+    item = _store(settings).items()[0]
+    assert r.failed == [item.key] and item.status is ItemStatus.failed and item.attempts == 1

@@ -6,3 +6,13 @@ work/
 .venv/
 __pycache__/
 *.pyc
+
+*.log
+.coverage
+.pytest_cache/
+.ruff_cache/
+inbox/
+logs/
+coverage.xml
+htmlcov/
+site/

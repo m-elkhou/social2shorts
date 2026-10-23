@@ -15,15 +15,17 @@
 - [x] Instagram discovery & cross-platform dedupe
 - [x] Continuous mode & Windows Scheduler
 
-## 🟡 In Progress (Sprint A)
-- [ ] Full Google-style docstrings for all modules
-- [ ] README.md, Handoff.md, and TODO.md creation
-- [ ] Implementation of `run-top --limit 10` command
+## 🟢 Core rework (Oct 2026)
+- [x] One shared item processor; `run --source catalog|raw|all`, `--dry-run`, `--continuous`
+- [x] Raw inbox path (sha256 dedupe) wired to the montage engine
+- [x] Quota tracking + scheduled publication (`publishAt`)
+- [x] Instagram discovery wired; cross-platform dedupe
+- [x] google-genai migration, humanized metadata, word-level whisper
+- [x] Upload retry/backoff, DB migrations, approval flow
 
 ## 🔴 Future Enhancements (Phase 3+)
 - [ ] **Advanced Curation**: Integrate LLM-based content analysis for better scoring.
 - [ ] **Enhanced Transcoding**: Add dynamic overlays, brand watermarks, or B-roll insertion.
-- [ ] **Better Error Recovery**: Implement a more granular retry system for transient YouTube API errors.
 - [ ] **Multi-Profile Support**: Handle multiple source profiles in one run.
 - [ ] **Web Dashboard**: A simple Flask/FastAPI UI to manage the review queue and track upload stats.
 - [ ] **Cloud Deployment**: Containerize with Docker for headless server execution.

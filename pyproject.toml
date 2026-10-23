@@ -1,7 +1,7 @@
 [project]
 name = "social2shorts"
 version = "0.1.0"
-description = "Republish curated TikTok/Instagram videos as YouTube Shorts"
+description = "Turn TikTok/Instagram reels and raw moto footage into monetization-safe YouTube Shorts"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "av>=19.0.1",
@@ -9,14 +9,15 @@ dependencies = [
     "google-api-python-client>=2.201.0",
     "google-auth-httplib2>=0.4.4",
     "google-auth-oauthlib>=1.5.0",
-    "google-generativeai>=0.8.6",
+    "google-genai>=2.33.0",
     "imagehash>=4.3.2",
     "pillow>=13.0.0",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
-    "pywin32>=312",
+    "pywin32>=312; sys_platform == 'win32'",
     "rich>=15.0.0",
     "typer>=0.27.3",
+    "tzdata>=2026.5",
     "yt-dlp>=2026.8.19",
 ]
 
@@ -32,9 +33,34 @@ packages = ["src/social2shorts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
+addopts = ["--strict-markers"]
+markers = ["integration: end-to-end tests using real ffmpeg (deselect with -m 'not integration')"]
+
+[tool.coverage.run]
+source = ["social2shorts"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:", ": \\.\\.\\.$"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.2",
+]
+docs = [
+    "mkdocs-material>=9.7.7",
+    "mkdocstrings[python]>=1.0.8",
 ]

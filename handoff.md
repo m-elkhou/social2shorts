@@ -1,37 +1,28 @@
-# 🤝 Technical Handoff: social2shorts
+# Technical handoff: social2shorts
 
-## 🏗️ System Architecture
-The project follows a staged pipeline architecture:
-`Discovery` $\rightarrow$ `Curation` $\rightarrow$ `Ingestion` $\rightarrow$ `Matching` $\rightarrow$ `Enrichment` $\rightarrow$ `Transcode` $\rightarrow$ `Upload`.
+## Architecture
+Ports & adapters. `ports.py` declares the `typing.Protocol` interfaces (catalog source, phone
+originals, media probe, transcriber, LLM, renderer, video platform). Adapters live in
+`sources/` (yt-dlp, MTP phone, inbox), `ai/` (faster-whisper, Gemini) and `publish/` (YouTube,
+Content-ID check, quota, scheduler). `pipeline.py` has ONE item processor shared by the two source
+strategies (`CatalogStrategy`, `RawStrategy`). `db.Store` is the SQLite repository; the schema is
+versioned with `PRAGMA user_version` (add a function to `db.MIGRATIONS` to change it).
 
-### Key Components
-- **Storage**: SQLite is used for the `catalog`, `matches`, `review_queue`, and `ledger`.
-- **Matching**: Uses `imagehash.phash` on sampled frames. A match is only confirmed if the duration is within `duration_tol_s` AND the pHash distance is below `phash_threshold`.
-- **Safety**: The `audio_gate` and `contentid` modules act as filters. Any video flagged as "licensed" or "claimed" is routed to the `review_queue` and set to `private`.
-- **Idempotency**: The `ledger` table stores a fingerprint of each source video. This prevents the same content from being uploaded twice, even if it exists on both TikTok and Instagram.
+## Item lifecycle
+`discovered -> (pending_original | ambiguous | review_audio) -> rendered (dry run) -> uploaded`
+(`-> claimed` if the guard flags it). Errors move an item to `failed`, retried up to 3 times, then
+to the review queue. `review --approve` sets `ready` (processed first next run), `--reject` sets
+`rejected`.
 
-## 🛠️ Maintenance Guide
+## Operations
+- Auth alert: run `uv run social2shorts auth`; it also clears the alert shown by `status`.
+- Quota: `status` shows units used today (Pacific day). Tune `[youtube] daily_quota_units` if
+  Google grants more.
+- Phone not plugged in: the catalog path uses the cached originals in `originals_dir`.
 
-### Adding a New Source
-To add a new platform (e.g., Facebook Reels):
-1. Implement a new discovery function in `discover.py`.
-2. Map the result to the `CatalogEntry` model.
-3. Update `pipeline.py` to include the new source.
-
-### Debugging MTP Ingestion
-The `MtpPhoneSource` relies on Windows `Shell.Application`. If phone detection fails:
-- Verify the `phone_name_match` in `config.toml`.
-- Ensure the phone is in "File Transfer" mode.
-- Check that the `Movies/Edits` or `Movies/Instagram` folders exist.
-
-### API Key Management
-- **Gemini**: Uses a free key. If quotas are hit, consider upgrading to a paid tier.
-- **YouTube**: Uses OAuth 2.0. If the `token.json` expires or is corrupted, run `social2shorts auth` to re-authenticate.
-
-## ⚠️ Known Limitations
-- **Single-Threaded**: The pipeline processes videos sequentially.
-- **Windows Bound**: The MTP ingestion is specific to the Windows COM API.
-- **pHash Memory**: Currently decodes all frames for pHash; acceptable for short-form but might need seeking for longer clips.
-
-## 🚀 Deployment
-The project is designed to run as a local automation tool. Use the `scripts/scheduled_run.ps1` to register it as a Windows Scheduled Task for hands-off operation.
+## Known limitations
+- Content ID claims are not exposed by the public Data API; the guard uses rejection, region
+  blocking and `licensedContent` signals, re-checked for 3 days after upload.
+- MTP ingestion is Windows-only (COM `Shell.Application`).
+- Cross-platform dedupe relies on caption + rounded duration.
+- Processing is sequential (by design: the YouTube quota is the bottleneck).
