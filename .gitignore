@@ -16,3 +16,4 @@ logs/
 coverage.xml
 htmlcov/
 site/
+*.db
