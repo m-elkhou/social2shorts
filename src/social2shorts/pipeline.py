@@ -23,8 +23,8 @@ from social2shorts.ai.transcribe import WhisperTranscriber
 from social2shorts.config import Settings
 from social2shorts.curate import curate
 from social2shorts.db import Store
-from social2shorts.match import index_originals, match_one
 from social2shorts.lock import AlreadyRunning, single_instance
+from social2shorts.match import index_originals, match_one
 from social2shorts.media import LocalMedia, content_hash
 from social2shorts.models import (
     Item,
@@ -294,7 +294,8 @@ class RawStrategy:
 
     def refresh(self, run: Run) -> None:
         """Register new inbox files (deduped by content hash)."""
-        for video in scan_inbox(Path(run.settings.sources.inbox_dir), run.store):
+        inbox = Path(run.settings.sources.inbox_dir)
+        for video in scan_inbox(inbox, run.store, now=run.deps.clock().timestamp()):
             run.store.upsert_raw(video.key, video.sha256, str(video.path))
 
     def candidates(self, run: Run) -> list[Item]:

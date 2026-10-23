@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from fakes import NOW, FakeLLM, FakeOriginals, FakePlatform, FakeTranscriber
+from fakes import NOW, FakeLLM, FakeOriginals, FakePlatform, FakeTranscriber, settled
 
 from social2shorts.config import Settings
 from social2shorts.db import Store
@@ -46,9 +46,11 @@ def test_raw_inbox_dry_run_then_upload(tmp_path):
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     _clip(inbox / "VID_0001.mp4")
+    settled(inbox / "VID_0001.mp4")
     settings = Settings(
         work_dir=str(tmp_path / "work"), db_path=str(tmp_path / "db.sqlite"),
         originals_dir=str(tmp_path / "originals"), sources={"inbox_dir": str(inbox)},
+        min_duration_s=1.0,
     )  # fmt: skip
     renderer, platform = CopyRenderer(), FakePlatform()
     deps = PipelineDeps(

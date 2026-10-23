@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from collections.abc import Sequence
-from typing import Any, TypeVar
+from typing import Any
 
 from social2shorts.models import ShortMeta
 from social2shorts.ports import LLM
@@ -105,10 +105,14 @@ FALLBACK = {
     },
 }  # fmt: skip
 _STOPWORDS = frozenset(
-    "alors avec avoir comme dans elle encore faire juste mais même parce pour quand quoi "
-    "rien sont tout très vraiment voilà about after again because before being could "
-    "really right there their these thing think going gonna yeah would".split()
-)
+    {
+        "alors", "avec", "avoir", "comme", "dans", "elle", "encore", "faire", "juste", "mais",
+        "même", "parce", "pour", "quand", "quoi", "rien", "sont", "tout", "très", "vraiment",
+        "voilà", "about", "after", "again", "because", "before", "being", "could", "really",
+        "right", "there", "their", "these", "thing", "think", "going", "gonna", "yeah", "would",
+    }
+)  # fmt: skip
+
 
 # ------------------------------------------------------------------ adapter
 @functools.cache
@@ -138,8 +142,8 @@ class GeminiLLM:
 def humanize(text: str, max_emojis: int = MAX_EMOJIS) -> str:
     """Make generated text read like a rider wrote it.
 
-    Drops ``<``/``>``, rewrites banned AI phrases, keeps at most ``max_emojis`` emojis, turns ALL-CAPS words
-    into Capitalized ones and collapses repeated punctuation and spaces.
+    Drops ``<``/``>``, rewrites banned AI phrases, keeps at most ``max_emojis`` emojis, turns
+    ALL-CAPS words into Capitalized ones and collapses repeated punctuation and spaces.
     """
     text = text.replace("<", "").replace(">", "")  # YouTube rejects them (invalidTitle)
     for pattern, replacement in _BANNED_RE:
@@ -161,10 +165,7 @@ def humanize(text: str, max_emojis: int = MAX_EMOJIS) -> str:
     return "\n".join(line.strip() for line in text.splitlines()).strip()
 
 
-T = TypeVar("T")
-
-
-def pick(options: Sequence[T], key: str, salt: str) -> T:
+def pick[T](options: Sequence[T], key: str, salt: str) -> T:
     """Deterministic, evenly spread choice per item (same key -> same choice on retries)."""
     digest = hashlib.sha256(f"{salt}:{key}".encode()).digest()
     return options[int.from_bytes(digest[:4], "big") % len(options)]

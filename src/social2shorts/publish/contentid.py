@@ -30,7 +30,8 @@ def claims_from_item(item: dict) -> list[Claim]:
     if region.get("blocked"):
         claims.append(Claim(video_id=vid, reason=f"blocked in {len(region['blocked'])} countries"))
     if "allowed" in region:  # an allow-list (even empty) means viewable only in those countries
-        claims.append(Claim(video_id=vid, reason=f"only viewable in {len(region['allowed'])} countries"))
+        allowed = len(region["allowed"])
+        claims.append(Claim(video_id=vid, reason=f"only viewable in {allowed} countries"))
     if details.get("licensedContent"):
         claims.append(Claim(video_id=vid, reason="claimed as licensed content"))
     return claims

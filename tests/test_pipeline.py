@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fakes import FakeLLM, entry
+from fakes import FakeLLM, entry, settled
 
 from social2shorts import operations
 from social2shorts.db import Store
@@ -27,7 +27,7 @@ def _raw(settings, name: str, content: bytes) -> Path:
     inbox.mkdir(parents=True, exist_ok=True)
     path = inbox / name
     path.write_bytes(content)
-    return path
+    return settled(path)
 
 
 def test_catalog_routes_and_is_idempotent(settings, deps):

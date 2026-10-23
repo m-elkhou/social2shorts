@@ -15,8 +15,9 @@ def _store(tmp_path) -> Store:
 
 def test_fresh_schema_and_idempotent_init(tmp_path):
     s = _store(tmp_path)
-    assert s.schema_version() == SCHEMA_VERSION == 2
-    assert s.init_schema() == SCHEMA_VERSION
+    assert s.schema_version() == SCHEMA_VERSION == 3
+    s.init_schema()
+    assert s.schema_version() == SCHEMA_VERSION
 
 
 def test_migrates_legacy_database(tmp_path):
@@ -32,10 +33,11 @@ def test_migrates_legacy_database(tmp_path):
         for reason in ("licensed music", "licensed music"):
             c.execute("INSERT INTO review_queue (source_id, reason) VALUES ('7', ?)", (reason,))
     s = Store(path)
-    assert s.init_schema() == SCHEMA_VERSION
+    s.init_schema()
+    assert s.schema_version() == SCHEMA_VERSION
     item = s.item("7")
     assert item.status is ItemStatus.review_audio and item.fingerprint == catalog_fingerprint(e)
-    assert s.is_uploaded("f") and s.uploads()[0].youtube_id == "y9"
+    assert s.is_legacy_uploaded("f") and s.uploads()[0].youtube_id == "y9"
     reviews = s.reviews()
     assert len(reviews) == 1 and reviews[0]["kind"] == "audio"
 
@@ -61,8 +63,9 @@ def test_uploads_ledger_and_quota(tmp_path):
     s = _store(tmp_path)
     at = datetime(2026, 10, 24, 11, tzinfo=UTC)
     s.record_upload(Upload(youtube_id="y", item_key="A", fingerprint="fp", privacy="private",
-                           publish_at=at, uploaded_at=at, quota_units=1600))  # fmt: skip
-    assert s.is_uploaded("fp") and s.publish_times() == [at]
+                           content_sha256="sha", publish_at=at, uploaded_at=at,
+                           quota_units=1600))  # fmt: skip
+    assert s.has_upload("A") and s.is_content_uploaded("sha") and not s.is_legacy_uploaded("fp") and s.publish_times() == [at]
     s.set_upload_privacy("y", "public")
     assert s.uploads()[0].privacy == "public" and s.publish_times() == []
     s.spend_quota("2026-10-23", 1600, uploads=1)

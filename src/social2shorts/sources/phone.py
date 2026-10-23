@@ -16,6 +16,7 @@ from social2shorts.sources import VIDEO_EXTS, video_files
 
 log = logging.getLogger(__name__)
 
+
 class PhoneNotFound(Exception):
     """No connected device matches the configured name."""
 

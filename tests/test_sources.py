@@ -1,18 +1,19 @@
 import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
 
 from social2shorts.db import Store
 from social2shorts.models import Platform
-from social2shorts.sources.inbox import scan_inbox, sha256_file
+from social2shorts.media import sha256_file
+from social2shorts.sources.inbox import SETTLE_S, scan_inbox
 from social2shorts.sources.phone import (
     FileNotOnPhone,
     PhoneNotFound,
     PhoneOriginals,
     PhoneVideo,
-    _parse_duration,
     sync_originals,
 )
 from social2shorts.sources.tiktok_instagram import (
@@ -105,7 +106,7 @@ def test_sync_copies_only_missing_files(tmp_path):
     device = FakeDevice({"a.mp4": tmp_path / "a.mp4", "b.mp4": tmp_path / "b.mp4"})
     dest = tmp_path / "originals"
     assert len(sync_originals(device, ["Movies/Edits"], dest)) == 2
-    assert sync_originals(device, ["Movies/Edits"], dest, limit=1) == [dest / "a.mp4"]
+    assert sync_originals(device, ["Movies/Edits"], dest, limit=1) == []  # all cached
     (dest / "b.mp4").write_bytes(b"b")  # truncated copy -> size differs -> copied again
     sync_originals(device, ["Movies/Edits"], dest)
     assert device.copied == ["a.mp4", "b.mp4", "b.mp4"]
@@ -122,11 +123,6 @@ def test_phone_originals_falls_back_to_cache(tmp_path):
     assert PhoneOriginals(unplugged, ["Movies/Edits"]).sync(dest) == [dest / "cached.mp4"]
 
 
-def test_parse_duration():
-    assert _parse_duration("") is None and _parse_duration("abc") is None
-    assert _parse_duration("00:00:15") == 15.0 and _parse_duration("1:02") == 62.0
-
-
 # --------------------------------------------------------------- inbox adapter
 def test_scan_inbox_dedupes_and_caches_hash(tmp_path, monkeypatch):
     inbox = tmp_path / "inbox"
@@ -137,13 +133,14 @@ def test_scan_inbox_dedupes_and_caches_hash(tmp_path, monkeypatch):
     (inbox / "notes.txt").write_text("not a video")
     store = Store(tmp_path / "db.sqlite")
     store.init_schema()
-    found = scan_inbox(inbox, store)
+    later = time.time() + 2 * SETTLE_S
+    found = scan_inbox(inbox, store, now=later)
     assert len(found) == 2 and found[0].sha256 == sha256_file(inbox / "a.mp4")
     assert found[0].key == f"raw-{found[0].sha256[:16]}"
 
     def boom(path):
         raise AssertionError("hash should come from the cache")
 
-    monkeypatch.setattr("social2shorts.sources.inbox.sha256_file", boom)
-    assert len(scan_inbox(inbox, store)) == 2
+    monkeypatch.setattr("social2shorts.media.sha256_file", boom)
+    assert len(scan_inbox(inbox, store, now=later)) == 2
     assert scan_inbox(tmp_path / "missing", store) == []

@@ -1,4 +1,4 @@
-"""Single-instance lock: a PID file in the work dir so a manual run never overlaps a scheduled one."""
+"""Single-instance lock: a PID file in the work dir so manual and scheduled runs never overlap."""
 
 from __future__ import annotations
 

@@ -122,11 +122,12 @@ def test_publish_one_and_all(monkeypatch, tmp_path):
     _uploaded(store, "B", "yt2")
     platform = Platform(fail_on="yt1")
     _patch_platform(monkeypatch, platform)
-    r = runner.invoke(app, ["publish", "all", "-c", cfg])
+    assert runner.invoke(app, ["publish", "all", "-c", cfg]).exit_code != 0  # --privacy required
+    r = runner.invoke(app, ["publish", "all", "--privacy", "public", "-c", cfg])
     assert platform.calls == [("yt1", "public"), ("yt2", "public")]
     assert r.exit_code == 1 and "Succeeded: 1, failed: 1" in r.output
     assert [u.privacy for u in store.uploads()] == ["unlisted", "public"]
-    assert runner.invoke(app, ["publish", "nope", "-c", cfg]).exit_code == 1
+    assert runner.invoke(app, ["publish", "nope", "--privacy", "public", "-c", cfg]).exit_code == 1
     assert runner.invoke(app, ["publish", "A", "--privacy", "publc", "-c", cfg]).exit_code != 0
 
 

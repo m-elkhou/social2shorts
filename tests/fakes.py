@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,13 @@ from social2shorts.models import CatalogEntry, Claim, Platform, ShortMeta, Uploa
 from social2shorts.montage.types import MontageSettings, Word
 
 NOW = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
+
+
+def settled(path: Path) -> Path:
+    """Backdate a file so the inbox scanner sees it as fully copied at ``NOW``."""
+    old = NOW.timestamp() - 3600
+    os.utime(path, (old, old))
+    return path
 
 
 def entry(sid: str, dur: float = 20.0, track: str = "original sound", **kw) -> CatalogEntry:
@@ -53,9 +61,10 @@ class FakeMedia:
 
     durations: dict[str, float] = field(default_factory=dict)
     hashes: dict[str, str] = field(default_factory=dict)
+    default_duration: float = 60.0
 
     def duration(self, path: Path) -> float:
-        return self.durations.get(path.stem, 0.0)
+        return self.durations.get(path.stem, self.default_duration)
 
     def phashes(self, path: Path, n_frames: int) -> list[str]:
         return [self.hashes.get(path.stem.removeprefix("ref-"), "0f0f0f0f")]
