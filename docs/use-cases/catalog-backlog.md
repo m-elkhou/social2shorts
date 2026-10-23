@@ -53,6 +53,9 @@ and the smallest Hamming distance between any pair of frame pHashes is at most
 reference pHashes per post are cached too, so a post waiting for its original is never
 downloaded twice.
 
+Frames are turned upright before hashing, so a portrait original stored as rotated
+landscape still matches its upright social copy.
+
 Exactly one candidate is required. Several candidates (a series filmed the same night) go to
 review: the tool never guesses.
 

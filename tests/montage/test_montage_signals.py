@@ -95,3 +95,21 @@ def test_rev_peaks_spacing_and_threshold() -> None:
 
 def test_rev_envelope_silence() -> None:
     assert rev_envelope(np.zeros(8000, dtype=np.float32), 8000, 5, 5.0) == [0.0] * 5
+
+
+def test_parse_probe_colour_fields() -> None:
+    hlg = _probe_json(
+        pix_fmt="yuv420p10le",
+        color_transfer="arib-std-b67",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+    )
+    info = parse_probe(hlg, "hdr.mp4")
+    assert (info.pix_fmt, info.color_primaries, info.color_space) == (
+        "yuv420p10le",
+        "bt2020",
+        "bt2020nc",
+    )
+    assert info.is_hdr
+    assert not parse_probe(_probe_json(color_transfer="bt709"), "sdr.mp4").is_hdr
+    assert parse_probe(_probe_json(color_transfer="smpte2084"), "pq.mp4").is_hdr

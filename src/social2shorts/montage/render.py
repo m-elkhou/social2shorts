@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import shutil
@@ -62,7 +63,7 @@ def render(
             )
             with open(ass_path, "w", encoding="utf-8") as fh:
                 fh.write(doc)
-        cmd = build_command(plan, dst, settings, ass_path)
+        cmd = build_command(plan, dst, settings, ass_path, zscale=has_zscale())
         log.info(
             "rendering %s → %s (%d cuts, %.1fs)",
             plan.source.path,
@@ -71,7 +72,9 @@ def render(
             plan.duration,
         )
         log.debug("ffmpeg %s", " ".join(cmd[1:]))
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
         if proc.returncode != 0:
             raise MontageError(
                 f"ffmpeg failed ({proc.returncode}): {proc.stderr.strip()[-STDERR_TAIL:]}"
@@ -79,6 +82,16 @@ def render(
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     return _validate(plan, dst, settings)
+
+
+@functools.cache
+def has_zscale() -> bool:
+    """Whether this ffmpeg build has the zscale filter (checked once per process)."""
+    proc = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-filters"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )  # fmt: skip
+    return " zscale " in proc.stdout
 
 
 def _validate(plan: EditPlan, dst: str, settings: MontageSettings) -> RenderResult:

@@ -7,7 +7,15 @@ from itertools import pairwise
 
 import pytest
 
-from social2shorts.montage import Cut, MontageMode, MontageSettings, Word, plan_edit, remap_words
+from social2shorts.montage import (
+    Cut,
+    MontageError,
+    MontageMode,
+    MontageSettings,
+    Word,
+    plan_edit,
+    remap_words,
+)
 from social2shorts.montage.planner import (
     BREATH_S,
     CROP_MAX_SHIFT,
@@ -229,3 +237,19 @@ def test_loop_crossfade_only_in_highlight(analysis_factory, info_factory) -> Non
     assert plan_edit(info_factory(), analysis_factory(), [], SETTINGS).loop_s == LOOP_XFADE_S
     polish = SETTINGS.model_copy(update={"mode": MontageMode.polish})
     assert plan_edit(info_factory(), analysis_factory(), [], polish).loop_s == 0.0
+
+
+def test_short_clip_kept_whole_in_highlight(analysis_factory, info_factory) -> None:
+    a = analysis_factory(duration=10.0, peaks=((4.0, 6.0),))
+    s = SETTINGS.model_copy(update={"min_duration_s": 5.0})
+    plan = plan_edit(info_factory(10.0), a, [], s)
+    assert len(plan.cuts) == 1
+    assert (plan.cuts[0].start, plan.cuts[0].end) == (0.0, 10.0)
+    assert "kept whole" in plan.cuts[0].reason
+
+
+@pytest.mark.parametrize("mode", list(MontageMode))
+def test_too_short_raises(analysis_factory, info_factory, mode) -> None:
+    a = analysis_factory(duration=3.0, peaks=())
+    with pytest.raises(MontageError, match="too short"):
+        plan_edit(info_factory(3.0), a, [], SETTINGS.model_copy(update={"mode": mode}))

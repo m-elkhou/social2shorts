@@ -1,4 +1,8 @@
-"""Perceptual hashes of a few sampled video frames, and the distance between two hash sets."""
+"""Perceptual hashes of a few sampled video frames, and the distance between two hash sets.
+
+Frames are turned upright first (display-matrix rotation), so a portrait phone original stored
+as rotated landscape matches its upright social-media copy.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +33,7 @@ def phash_file(path: str | Path, n_frames: int) -> list[str]:
         for t in sample_times(duration, n_frames):
             frame = _frame_at(container, stream, t)
             if frame is not None:
-                hashes.append(str(imagehash.phash(frame.to_image())))
+                hashes.append(_hash(frame))
         return hashes
 
 
@@ -60,10 +64,18 @@ def _hash_sequential(
     hashes = []
     for i, frame in enumerate(container.decode(stream)):
         if i % _FALLBACK_STRIDE == 0:
-            hashes.append(str(imagehash.phash(frame.to_image())))
+            hashes.append(_hash(frame))
             if len(hashes) == n_frames:
                 break
     return hashes
+
+
+def _hash(frame: av.VideoFrame) -> str:
+    """pHash of the frame as displayed (rotation applied; PIL rotates counter-clockwise)."""
+    image = frame.to_image()
+    if frame.rotation:
+        image = image.rotate(frame.rotation, expand=True)
+    return str(imagehash.phash(image))
 
 
 def _hamming(x: str, y: str) -> int:

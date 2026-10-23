@@ -41,7 +41,9 @@ class ItemStatus(StrEnum):
     review_audio = "review_audio"  # licensed music: a human must approve
     ready = "ready"  # approved by a human: processed first on the next run
     failed = "failed"  # processing error: retried until MAX_ATTEMPTS, then reviewed
+    too_short = "too_short"  # raw clip below min_duration_s: a human decides
     rendered = "rendered"  # dry run output only
+    uploading = "uploading"  # API call in flight; left behind only if the run crashed
     uploaded = "uploaded"
     duplicate = "duplicate"  # same content already uploaded (e.g. the TikTok copy of an IG post)
     claimed = "claimed"  # uploaded, then flagged by the Content-ID guard
@@ -55,6 +57,8 @@ class ReviewKind(StrEnum):
     ambiguous = "ambiguous"
     error = "error"
     claim = "claim"
+    short = "short"
+    interrupted = "interrupted"  # crash during upload: check YouTube Studio before retrying
 
 
 class CatalogEntry(BaseModel):
@@ -146,6 +150,7 @@ class Upload(BaseModel):
     youtube_id: str
     item_key: str
     fingerprint: str
+    content_sha256: str | None = None  # sha256 of the source file (the real dedupe key)
     privacy: str
     publish_at: datetime | None = None
     uploaded_at: datetime

@@ -77,6 +77,29 @@ ALTER TABLE matches ADD COLUMN candidates TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE review_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'error';
 """
 
+_V3_UPLOADS = """
+CREATE TABLE uploads_v3 (
+    youtube_id TEXT PRIMARY KEY, item_key TEXT NOT NULL, fingerprint TEXT NOT NULL,
+    content_sha256 TEXT, privacy TEXT NOT NULL, publish_at TEXT, uploaded_at TEXT NOT NULL,
+    quota_units INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO uploads_v3 (youtube_id, item_key, fingerprint, privacy, publish_at, uploaded_at,
+                        quota_units)
+    SELECT youtube_id, item_key, fingerprint, privacy, publish_at, uploaded_at, quota_units
+    FROM uploads;
+DROP TABLE uploads;
+ALTER TABLE uploads_v3 RENAME TO uploads;
+CREATE INDEX idx_uploads_item ON uploads(item_key);
+CREATE INDEX idx_uploads_publish_at ON uploads(publish_at);
+CREATE INDEX idx_uploads_fingerprint ON uploads(fingerprint);
+CREATE INDEX idx_uploads_content ON uploads(content_sha256);
+UPDATE uploads SET uploaded_at = replace(uploaded_at, ' ', 'T') || '+00:00'
+    WHERE uploaded_at NOT LIKE '%+%' AND uploaded_at NOT LIKE '%Z';
+UPDATE review_queue SET kind = 'claim' WHERE reason LIKE 'Content-ID claim%';
+UPDATE items SET status = 'claimed'
+    WHERE key IN (SELECT source_id FROM review_queue WHERE kind = 'claim')
+"""
+
 
 def normalize_caption(caption: str) -> str:
     """Lowercase, drop punctuation/emoji and collapse whitespace."""
@@ -85,7 +108,11 @@ def normalize_caption(caption: str) -> str:
 
 
 def catalog_fingerprint(entry: CatalogEntry) -> str:
-    """Cross-platform dedupe key: the same reel on TikTok and Instagram shares it."""
+    """Soft cross-platform hint (caption + duration) used to prefer one platform's copy.
+
+    Never used alone to decide that a video was uploaded: captions differ between platforms
+    and emoji-only captions collide. The upload dedupe key is the source file's sha256.
+    """
     key = f"{normalize_caption(entry.caption)}|{round(entry.duration)}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 
@@ -95,7 +122,11 @@ def _iso(dt: datetime) -> str:
 
 
 def _dt(text: str | None) -> datetime | None:
-    return datetime.fromisoformat(text) if text else None
+    """Parse a stored timestamp; legacy naive values are UTC (SQLite CURRENT_TIMESTAMP)."""
+    if not text:
+        return None
+    dt = datetime.fromisoformat(text)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _run_script(c: sqlite3.Connection, script: str) -> None:
@@ -133,7 +164,13 @@ def _migrate_v2(c: sqlite3.Connection) -> None:
     c.execute("CREATE UNIQUE INDEX idx_review_item ON review_queue(source_id)")
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_v1, _migrate_v2]
+def _migrate_v3(c: sqlite3.Connection) -> None:
+    """Dedupe uploads by source content hash (caption fingerprint no longer unique), store
+    timestamps as ISO UTC and map legacy Content-ID reviews to claims."""
+    _run_script(c, _V3_UPLOADS)
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_v1, _migrate_v2, _migrate_v3]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -171,8 +208,8 @@ class Store:
             conn.close()
 
     # ------------------------------------------------------------------ schema
-    def init_schema(self) -> int:
-        """Apply pending migrations; return the resulting schema version."""
+    def init_schema(self) -> None:
+        """Apply pending migrations."""
         with self._tx() as c:
             version = c.execute("PRAGMA user_version").fetchone()[0]
             for number, migrate in enumerate(MIGRATIONS[version:], start=version + 1):
@@ -180,7 +217,6 @@ class Store:
                 migrate(c)
                 c.execute(f"PRAGMA user_version = {number}")
                 c.commit()
-        return self.schema_version()
 
     def schema_version(self) -> int:
         """Current ``PRAGMA user_version``."""
@@ -347,20 +383,30 @@ class Store:
         """Write the ledger row of a finished upload (call right after the API returns)."""
         with self._tx() as c:
             c.execute(
-                """INSERT INTO uploads (youtube_id, item_key, fingerprint, privacy, publish_at,
-                       uploaded_at, quota_units) VALUES (?,?,?,?,?,?,?)""",
-                (u.youtube_id, u.item_key, u.fingerprint, u.privacy,
+                """INSERT INTO uploads (youtube_id, item_key, fingerprint, content_sha256,
+                       privacy, publish_at, uploaded_at, quota_units) VALUES (?,?,?,?,?,?,?,?)""",
+                (u.youtube_id, u.item_key, u.fingerprint, u.content_sha256, u.privacy,
                  _iso(u.publish_at) if u.publish_at else None, _iso(u.uploaded_at),
                  u.quota_units),
             )  # fmt: skip
 
-    def is_uploaded(self, fingerprint: str) -> bool:
-        """True if content with this fingerprint is already on YouTube."""
+    def has_upload(self, item_key: str) -> bool:
+        """True if this item was already uploaded."""
+        return self._exists("SELECT 1 FROM uploads WHERE item_key = ?", item_key)
+
+    def is_content_uploaded(self, sha256: str) -> bool:
+        """True if a video rendered from this exact source file is already on YouTube."""
+        return self._exists("SELECT 1 FROM uploads WHERE content_sha256 = ?", sha256)
+
+    def is_legacy_uploaded(self, fingerprint: str) -> bool:
+        """True if a pre-v3 upload (no content hash) carries this caption fingerprint."""
+        return self._exists(
+            "SELECT 1 FROM uploads WHERE content_sha256 IS NULL AND fingerprint = ?", fingerprint
+        )
+
+    def _exists(self, sql: str, *args: object) -> bool:
         with self._tx() as c:
-            row = c.execute(
-                "SELECT 1 FROM uploads WHERE fingerprint = ?", (fingerprint,)
-            ).fetchone()
-        return row is not None
+            return c.execute(sql, args).fetchone() is not None
 
     def uploads(self, since: datetime | None = None) -> list[Upload]:
         """Ledger rows, oldest first (optionally only those uploaded since ``since``)."""
@@ -374,6 +420,7 @@ class Store:
                 youtube_id=r["youtube_id"],
                 item_key=r["item_key"],
                 fingerprint=r["fingerprint"],
+                content_sha256=r["content_sha256"],
                 privacy=r["privacy"],
                 publish_at=_dt(r["publish_at"]),
                 uploaded_at=_dt(r["uploaded_at"]),

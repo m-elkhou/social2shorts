@@ -1,4 +1,9 @@
-"""Build the ASS subtitle file: karaoke/minimal captions and the hook title card."""
+"""Build the ASS subtitle file: karaoke/minimal captions and the hook title card.
+
+Arabic/RTL text is written in logical order and shaped by libass (fribidi/HarfBuzz) at burn-in
+time. caption_font_fallback: if ``caption_font`` lacks Arabic glyphs, fontconfig substitutes a
+font that has them (e.g. Noto Sans Arabic) — install one on render machines for best results.
+"""
 
 from __future__ import annotations
 

@@ -30,7 +30,7 @@ SCOPES = [
 ]
 COST_LIST = 1  # videos.list
 COST_UPDATE = 50  # videos.update
-TRANSIENT_STATUS = frozenset({500, 502, 503, 504})
+TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504})  # other 4xx are never retried
 QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "uploadLimitExceeded"})
 MAX_TAGS_CHARS = 450  # YouTube rejects more than 500 characters of tags
 MAX_RETRIES = 8

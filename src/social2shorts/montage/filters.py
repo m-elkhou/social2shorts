@@ -4,19 +4,33 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .types import Cut, EditPlan, MontageSettings
+from .types import Cut, EditPlan, MediaInfo, MontageSettings
 
 GRADE = "hqdn3d=1.5:1.5:4:4,eq=contrast=1.06:saturation=1.15:gamma=1.04,unsharp=5:5:0.5:5:5:0.0"
 # gamma > 1 lifts shadows slightly so night footage keeps its detail instead of crushing.
 BG_DARKEN = "eq=brightness=-0.12:saturation=0.85"  # blurred background sits behind the subject
 AUDIO_EDGE_S = 0.015  # micro fade at every cut to avoid clicks
 DUCK = "sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400"
+# HDR (HLG/PQ) → SDR BT.709: linearise, tonemap with Hable, re-encode to BT.709 limited range.
+HDR_ZSCALE = (
+    "zscale=tin={tin}:pin=2020:min=2020_ncl:t=linear:npl=100,format=gbrpf32le,"
+    "zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+)
+HDR_FALLBACK = "colorspace=all=bt709:iall=bt2020:fast=1:format=yuv420p"  # no zscale build
+SDR_TAGS = ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
 
 
 def escape_filter_path(path: str) -> str:
     """Quote a file path for a filter option (Windows ``C:\\x`` → ``'C\\:/x'``)."""
     p = path.replace("\\", "/").replace(":", r"\:").replace("'", r"'\\\''")
     return f"'{p}'"
+
+
+def to_sdr(info: MediaInfo, zscale: bool) -> str:
+    """Filter prefix converting HDR input to SDR BT.709 (empty for SDR sources)."""
+    if not info.is_hdr:
+        return ""
+    return (HDR_ZSCALE.format(tin=info.color_transfer) if zscale else HDR_FALLBACK) + ","
 
 
 def _even(x: float) -> int:
@@ -82,22 +96,22 @@ def _punch_in(cut: Cut, w: int, h: int, fps: int) -> str:
     )
 
 
-def _video_chain(i: int, cut: Cut, plan: EditPlan, s: MontageSettings, mode: str) -> str:
+def _video_chain(i: int, cut: Cut, plan: EditPlan, s: MontageSettings, mode: str, sdr: str) -> str:
     w, h, fps = s.width, s.height, s.fps
     speed = f"/{cut.speed:g}" if cut.speed != 1.0 else ""
     frame = REFRAMES[mode](f"c{i}", cut, plan, w, h)
-    chain = f"[{i}:v]setpts=(PTS-STARTPTS){speed},fps={fps},{frame}"
+    chain = f"[{i}:v]{sdr}setpts=(PTS-STARTPTS){speed},fps={fps},{frame}"
     if cut.zoom > 1.0:
         chain += "," + _punch_in(cut, w, h, fps)
     return chain + f",setsar=1,format=yuv420p[v{i}]"
 
 
-def _loop_still(i: int, plan: EditPlan, s: MontageSettings, mode: str) -> str:
+def _loop_still(i: int, plan: EditPlan, s: MontageSettings, mode: str, sdr: str) -> str:
     """The opening frame (reframed like the first cut), held for ``plan.loop_s``."""
     frames = max(round(plan.loop_s * s.fps), 1)
     frame = REFRAMES[mode]("lp", plan.cuts[0], plan, s.width, s.height)
     return (
-        f"[{i}:v]setpts=PTS-STARTPTS,fps={s.fps},{frame},setsar=1,format=yuv420p,"
+        f"[{i}:v]{sdr}setpts=PTS-STARTPTS,fps={s.fps},{frame},setsar=1,format=yuv420p,"
         f"trim=end_frame=1,loop=loop={frames - 1}:size=1,setpts=N/({s.fps}*TB),settb=AVTB[vfirst]"
     )
 
@@ -123,9 +137,9 @@ def _accent_hex(ass_colour: str) -> str:
 
 
 def build_filter_graph(
-    plan: EditPlan, settings: MontageSettings, ass_path: str | None = None
+    plan: EditPlan, settings: MontageSettings, ass_path: str | None = None, *, zscale: bool = False
 ) -> str:
-    """Build the full filter graph.
+    """Build the full filter graph (``zscale``: ffmpeg has it, for HDR tonemapping).
 
     Inputs ``0..N-1`` are the cuts, then the opening still (when ``plan.loop_s``), then the
     music (if any). Output pads are ``[vout]`` and ``[aout]``.
@@ -134,12 +148,13 @@ def build_filter_graph(
     mode = plan.reframe or s.reframe
     n = len(plan.cuts)
     loop = _loops(plan)
-    parts = [_video_chain(i, c, plan, s, mode) for i, c in enumerate(plan.cuts)]
+    sdr = to_sdr(plan.source, zscale)
+    parts = [_video_chain(i, c, plan, s, mode, sdr) for i, c in enumerate(plan.cuts)]
     parts += [_audio_chain(i, c, plan.source.has_audio) for i, c in enumerate(plan.cuts)]
     pads = "".join(f"[v{i}][a{i}]" for i in range(n))
     parts.append(f"{pads}concat=n={n}:v=1:a=1[vc][ac]")
     if loop:  # crossfade the tail into the opening frame so the replay is seamless
-        parts.append(_loop_still(n, plan, s, mode))
+        parts.append(_loop_still(n, plan, s, mode, sdr))
         parts.append(
             f"[vc]settb=AVTB[vct];[vct][vfirst]xfade=transition=fade:duration={plan.loop_s:g}"
             f":offset={d - plan.loop_s:.3f}[vl]"
@@ -190,7 +205,12 @@ def _loops(plan: EditPlan) -> bool:
 
 
 def build_command(
-    plan: EditPlan, dst: str, settings: MontageSettings, ass_path: str | None = None
+    plan: EditPlan,
+    dst: str,
+    settings: MontageSettings,
+    ass_path: str | None = None,
+    *,
+    zscale: bool = False,
 ) -> list[str]:
     """Full ffmpeg argv: one fast-seeked input per cut, optional looped music, H.264/AAC out."""
     s = settings
@@ -202,10 +222,10 @@ def build_command(
     if plan.music:
         cmd += ["-stream_loop", "-1", "-i", plan.music]
     cmd += [
-        "-filter_complex", build_filter_graph(plan, s, ass_path),
+        "-filter_complex", build_filter_graph(plan, s, ass_path, zscale=zscale),
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-profile:v", "high", "-preset", s.preset, "-crf", str(s.crf),
-        "-pix_fmt", "yuv420p", "-r", str(s.fps), "-g", str(2 * s.fps),
+        "-pix_fmt", "yuv420p", "-r", str(s.fps), "-g", str(2 * s.fps), *SDR_TAGS,
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-t", f"{plan.duration:.3f}", "-movflags", "+faststart", dst,
     ]  # fmt: skip

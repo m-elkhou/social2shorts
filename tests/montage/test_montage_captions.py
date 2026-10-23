@@ -96,3 +96,17 @@ def test_text_stays_inside_safe_box(w: int, h: int, var: Variation) -> None:
             assert h - mv <= bottom and h - mv - size >= top
         else:  # top-aligned hook card
             assert mv >= top and mv + size <= h / 3
+
+
+def test_arabic_words_escaped_and_in_order() -> None:
+    words = [
+        Word(start=0.0, end=0.4, text="مرحبا"),
+        Word(start=0.45, end=0.8, text="{بكم}"),
+        Word(start=0.85, end=1.2, text="يا\\شباب"),
+    ]
+    minimal = MontageSettings(captions=CaptionStyle.minimal)
+    phrase = _events(build_ass(words, minimal, duration=5, variation=VAR))[0].split(",,", 2)[-1]
+    assert phrase.split() == ["مرحبا", "(بكم)", "يا\uff3cشباب"]  # logical order, escaped
+    karaoke = _events(build_ass(words, MontageSettings(), duration=5, variation=VAR))
+    assert "{\\c&H00E5FF&}(بكم)" in karaoke[1]
+    assert re.sub(r"\{[^}]*\}", "", karaoke[1].split(",,", 2)[-1]).split() == ["مرحبا", "(بكم)"]

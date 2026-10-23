@@ -43,6 +43,8 @@ sequenceDiagram
 
 - **Dedupe.** A file is keyed by its content hash. Renaming or moving it keeps the same item;
   an exact copy is skipped.
+- **Copies in progress.** A file modified in the last 60 s is skipped for this run (it may
+  still be copying). An unreadable file (locked by another program) is skipped with a warning.
 - **Highlight mode.** The engine scores every 0.2 s of the clip (motion, loudness, speech,
   engine revs), pulls the best 2 s to the front as a hook, fills about 35 s with the best
   segments in chronological order, and ends on an energy peak that crossfades back into the

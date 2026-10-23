@@ -10,6 +10,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from .analyze import Analysis
+from .errors import MontageError
 from .style import make_variation, seed_for
 from .types import Cut, EditPlan, MediaInfo, MontageMode, MontageSettings, Variation, Word
 
@@ -187,7 +188,7 @@ def _crop_x(a: Analysis, cuts: Sequence[Cut]) -> float:
     return round(float(np.median(xs)), 3) if xs else 0.5
 
 
-def _plan_polish(a: Analysis, duration: float) -> list[Cut]:
+def _plan_polish(a: Analysis, duration: float, label: str = "polish: full clip") -> list[Cut]:
     """Whole clip, minus an obviously dead (static + silent + speechless) head/tail."""
     motion = _norm(a.motion)
     dead = (
@@ -197,7 +198,7 @@ def _plan_polish(a: Analysis, duration: float) -> list[Cut]:
     )
     head = int(np.argmin(dead)) if not dead.all() else 0
     tail = int(np.argmin(dead[::-1])) if not dead.all() else 0
-    start, end, notes = 0.0, duration, ["polish: full clip"]
+    start, end, notes = 0.0, duration, [label]
     if head / a.sample_hz >= POLISH_MIN_TRIM_S:
         start = head / a.sample_hz
         notes.append(f"trimmed {start:.1f}s dead head")
@@ -406,13 +407,17 @@ def plan_edit(
     duration = info.duration or analysis.n / analysis.sample_hz
     if settings.mode == MontageMode.polish:
         cuts = _plan_polish(analysis, duration)
+    elif duration <= settings.target_duration_s:  # nothing to cut away: keep it all
+        cuts = _plan_polish(analysis, duration, "highlight: clip within target, kept whole")
+        if settings.punch_in:
+            cuts = _apply_punch_in(cuts, var.punch_zoom, analysis.rev_peaks)
     else:
         cuts = _plan_highlight(analysis, words, settings, var, duration)
         if settings.punch_in:
             cuts = _apply_punch_in(cuts, var.punch_zoom, analysis.rev_peaks)
     if not cuts:
         cuts = [Cut(start=0.0, end=min(duration, POLISH_MAX_S), reason="fallback: full clip")]
-    loop = settings.mode == MontageMode.highlight and len(cuts) > 1
+    loop = settings.mode == MontageMode.highlight
     plan = EditPlan(
         source=info,
         cuts=_assign_crops(cuts, analysis),
@@ -422,6 +427,11 @@ def plan_edit(
         reframe=resolve_reframe(info, analysis, settings),
         variation=var,
     )
+    if plan.duration < settings.min_duration_s:
+        raise MontageError(
+            f"too short: {info.path} gives a {plan.duration:.1f}s Short "
+            f"(minimum {settings.min_duration_s:g}s)"
+        )
     log.info("planned %s: %d cuts, %.1fs, %s", info.path, len(cuts), plan.duration, plan.reframe)
     return plan
 

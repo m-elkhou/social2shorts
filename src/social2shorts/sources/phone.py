@@ -6,7 +6,6 @@ Only files missing locally (same name and size) are copied, so repeated runs are
 from __future__ import annotations
 
 import logging
-import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,9 +15,6 @@ from typing import Any, Protocol
 from social2shorts.sources import VIDEO_EXTS, video_files
 
 log = logging.getLogger(__name__)
-
-DURATION_HEADER = re.compile(r"Longueur|Length|Durée|Duration", re.IGNORECASE)
-
 
 class PhoneNotFound(Exception):
     """No connected device matches the configured name."""
@@ -39,7 +35,6 @@ class PhoneVideo:
     name: str
     folder: str
     size: int | None = None
-    duration_s: float | None = None
 
 
 class PhoneDevice(Protocol):
@@ -48,20 +43,6 @@ class PhoneDevice(Protocol):
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]: ...
 
     def copy(self, video: PhoneVideo, dest_dir: Path) -> Path: ...
-
-
-def _parse_duration(text: str) -> float | None:
-    """Parse an ``H:MM:SS`` (or ``M:SS``) duration into seconds."""
-    text = (text or "").strip().replace("‎", "").replace("‏", "")
-    if not text:
-        return None
-    try:
-        total = 0.0
-        for part in text.split(":"):
-            total = total * 60 + float(part)
-        return total
-    except ValueError:
-        return None
 
 
 def is_cached(video: PhoneVideo, dest_dir: Path) -> bool:
@@ -73,21 +54,18 @@ def is_cached(video: PhoneVideo, dest_dir: Path) -> bool:
 def sync_originals(
     device: PhoneDevice, folders: list[str], dest_dir: Path, limit: int | None = None
 ) -> list[Path]:
-    """Copy the phone videos not cached yet; return local paths of all listed videos.
+    """Copy the phone videos not cached yet; return the paths that were copied.
 
     Raises:
         FolderNotOnPhone: If a configured folder is missing on the phone.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
-    videos = device.list_videos(folders)[:limit]
-    paths: list[Path] = []
-    for video in videos:
-        if is_cached(video, dest_dir):
-            paths.append(dest_dir / video.name)
-            continue
-        log.info("Copying %s from the phone", video.name)
-        paths.append(device.copy(video, dest_dir))
-    return paths
+    copied: list[Path] = []
+    for video in device.list_videos(folders)[:limit]:
+        if not is_cached(video, dest_dir):
+            log.info("Copying %s from the phone", video.name)
+            copied.append(device.copy(video, dest_dir))
+    return copied
 
 
 class PhoneOriginals:
@@ -107,7 +85,8 @@ class PhoneOriginals:
         """Local originals after a best-effort sync."""
         if self.folders:
             try:
-                sync_originals(self.device_factory(), self.folders, dest_dir, self.limit)
+                copied = sync_originals(self.device_factory(), self.folders, dest_dir, self.limit)
+                log.info("Phone sync: %d new original(s) copied", len(copied))
             except (PhoneNotFound, FileNotOnPhone, ImportError, OSError, TimeoutError) as exc:
                 log.warning("Phone sync skipped (%s); using cached originals in %s", exc, dest_dir)
         return video_files(dest_dir)
@@ -160,35 +139,23 @@ class MtpPhoneSource:
                 return folder
         return None
 
-    @staticmethod
-    def _duration_col(folder: Any) -> int | None:
-        for c in range(321):
-            header = folder.GetDetailsOf(None, c)
-            if header and DURATION_HEADER.search(header):
-                return c
-        return None
-
-    def _items(self, path: str) -> tuple[Any, list[Any]]:
+    def _items(self, path: str) -> list[Any]:
         folder = self._resolve(path)
         if folder is None:
             raise FolderNotOnPhone(path)
-        items = [
+        return [
             it
             for it in folder.Items()
             if not it.IsFolder and Path(it.Name).suffix.lower() in VIDEO_EXTS
         ]
-        return folder, items
 
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]:
-        """Videos in ``folders`` with size and duration when the device reports them."""
-        out: list[PhoneVideo] = []
-        for path in folders:
-            folder, items = self._items(path)
-            col = self._duration_col(folder)
-            for it in items:
-                dur = _parse_duration(folder.GetDetailsOf(it, col)) if col is not None else None
-                out.append(PhoneVideo(it.Name, path, int(it.Size or 0) or None, dur))
-        return out
+        """Videos in ``folders`` with their size when the device reports it."""
+        return [
+            PhoneVideo(it.Name, path, int(it.Size or 0) or None)
+            for path in folders
+            for it in self._items(path)
+        ]
 
     def copy(self, video: PhoneVideo, dest_dir: Path) -> Path:
         """Copy one video and wait until it is complete.
@@ -197,7 +164,7 @@ class MtpPhoneSource:
             FileNotOnPhone: If the file vanished from the phone.
             TimeoutError: If the asynchronous MTP copy does not finish in time.
         """
-        _, items = self._items(video.folder)
+        items = self._items(video.folder)
         item = next((it for it in items if it.Name.lower() == video.name.lower()), None)
         if item is None:
             raise FileNotOnPhone(video.name)

@@ -56,6 +56,10 @@ def parse_probe(data: dict, path: str) -> MediaInfo:
         fps=fps,
         has_audio=any(s.get("codec_type") == "audio" for s in streams),
         rotation=rotation,
+        pix_fmt=video.get("pix_fmt", ""),
+        color_transfer=video.get("color_transfer", ""),
+        color_primaries=video.get("color_primaries", ""),
+        color_space=video.get("color_space", ""),
     )
 
 
@@ -66,7 +70,9 @@ def probe(src: str) -> MediaInfo:
         MontageError: If ffprobe fails or the file has no video.
     """
     cmd = ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", src]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+    )
     if proc.returncode != 0:
         raise MontageError(f"ffprobe failed on {src}: {proc.stderr.strip()[-500:]}")
     return parse_probe(json.loads(proc.stdout or "{}"), src)

@@ -37,10 +37,11 @@ on your `PATH`. uv installs Python for you if it is missing.
     ```
 
 Check that ffmpeg has the filters the renderer uses (`ass` for captions, `loudnorm`,
-`zoompan`, `xfade`) and the `libx264` encoder:
+`zoompan`, `xfade`) and the `libx264` encoder. `zscale` is optional: with it, HDR phone footage
+is tonemapped with better quality.
 
 ```bash
-ffmpeg -hide_banner -filters | grep -E " (ass|loudnorm|zoompan|xfade) "
+ffmpeg -hide_banner -filters | grep -E " (ass|loudnorm|zoompan|xfade|zscale) "
 ffmpeg -hide_banner -encoders | grep libx264
 uv run social2shorts --help
 ```

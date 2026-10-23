@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from social2shorts.db import Store
@@ -9,18 +10,28 @@ from social2shorts.models import CatalogEntry, ItemStatus, MatchResult, Original
 from social2shorts.phash import min_distance
 from social2shorts.ports import MediaProbe
 
+log = logging.getLogger(__name__)
+
 
 def index_originals(
     paths: list[Path], store: Store, media: MediaProbe, n_frames: int
 ) -> list[Original]:
-    """Duration + pHashes of each original, computed once per file (cached by path and size)."""
+    """Duration + pHashes of each original, computed once per file (cached by path and size).
+
+    An unreadable file (0-byte, partial copy, corrupt) is logged and skipped, so one bad
+    original never blocks matching for every other post.
+    """
     originals = []
     for path in paths:
-        size = path.stat().st_size
-        cached = store.cached_original(str(path), size)
-        if cached is None:
-            cached = (media.duration(path), media.phashes(path, n_frames))
-            store.cache_original(str(path), size, *cached)
+        try:
+            size = path.stat().st_size
+            cached = store.cached_original(str(path), size)
+            if cached is None:
+                cached = (media.duration(path), media.phashes(path, n_frames))
+                store.cache_original(str(path), size, *cached)
+        except Exception as exc:
+            log.warning("Skipping original %s: cannot read it (%s)", path.name, exc)
+            continue
         duration, phashes = cached
         originals.append(Original(path=str(path), duration=duration, phashes=phashes))
     return originals

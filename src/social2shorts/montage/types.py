@@ -73,6 +73,15 @@ class MediaInfo(BaseModel):
     fps: float
     has_audio: bool
     rotation: int = 0
+    pix_fmt: str = ""  # e.g. yuv420p10le for 10-bit phone footage
+    color_transfer: str = ""  # arib-std-b67 (HLG) / smpte2084 (PQ) mean HDR
+    color_primaries: str = ""
+    color_space: str = ""
+
+    @property
+    def is_hdr(self) -> bool:
+        """True for HLG or PQ sources, which must be tonemapped to SDR BT.709."""
+        return self.color_transfer in ("arib-std-b67", "smpte2084")
 
 
 class Cut(BaseModel):

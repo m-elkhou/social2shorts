@@ -103,3 +103,25 @@ def test_render_failure_raises(clips, tmp_path, fast_settings) -> None:
     plan.source.path = str(tmp_path / "missing.mp4")
     with pytest.raises(MontageError, match="ffmpeg failed"):
         render(plan, str(tmp_path / "x.mp4"), [], fast_settings)
+
+
+def test_hdr_hlg_10bit_is_tonemapped(tmp_path, fast_settings) -> None:
+    src = tmp_path / "hlg.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30",
+         "-t", "5", "-vf", "format=yuv420p10le", "-c:v", "libx264", "-preset", "ultrafast",
+         "-color_trc", "arib-std-b67", "-color_primaries", "bt2020", "-colorspace", "bt2020nc",
+         str(src)],
+        check=True,
+    )  # fmt: skip
+    assert probe(str(src)).is_hdr
+    s = fast_settings.model_copy(update={"min_duration_s": 2.0})
+    result = make_short(str(src), str(tmp_path / "sdr.mp4"), words=[], settings=s)
+    _check(result, s)
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
+         "stream=pix_fmt,color_transfer,color_primaries,color_space", "-of", "csv=p=0",
+         result.path],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout.strip()  # fmt: skip
+    assert out.split(",") == ["yuv420p", "bt709", "bt709", "bt709"]

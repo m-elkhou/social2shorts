@@ -28,7 +28,7 @@ flowchart LR
 
 | Step | Module | Output |
 |---|---|---|
-| probe | `probe.py` | `MediaInfo`: displayed width/height (after rotation), fps, duration, has_audio. |
+| probe | `probe.py` | `MediaInfo`: displayed width/height (after rotation), fps, duration, has_audio, pixel format and colour metadata (HDR detection). |
 | analyze | `analyze.py` | `Analysis`: per-sample motion, brightness, loudness, speech, subject position, scene cuts, audio onsets, rev envelope and rev peaks. |
 | plan | `planner.py`, `style.py` | `EditPlan`: cuts in output order with speed, zoom, crop; framing; variation; loop crossfade. Every cut carries a human-readable `reason`. |
 | render | `captions.py`, `filters.py`, `render.py` | ASS file, filter graph, ffmpeg command, validated `RenderResult`. |
@@ -40,9 +40,12 @@ Any failure raises `MontageError` with the tail of ffmpeg's stderr.
 | Mode | Used for | What the planner does |
 |---|---|---|
 | `polish` | Catalog posts (already edited) | Keeps the whole clip. Trims a dead head or tail (static, silent, no speech) of 0.5 s or more. Caps at 180 s. No hook cut, no punch-in, no loop. |
-| `highlight` | Raw inbox footage | Picks the best moments, hook first, re-cuts to `target_duration_s`, punch-ins, loop ending. |
+| `highlight` | Raw inbox footage | Picks the best moments, hook first, re-cuts to `target_duration_s`, punch-ins, loop ending. A clip already no longer than `target_duration_s` is kept whole (dead head/tail trimmed), with punch-ins and the loop ending. |
 
 The pipeline sets the mode per source kind. The `[montage] mode` key is overridden there.
+
+In both modes, a plan shorter than `[montage] min_duration_s` (12 s) raises
+`MontageError("too short: ...")` instead of rendering a clip too short to be worth a Short.
 
 ## Analysis signals
 
@@ -115,8 +118,9 @@ flowchart TD
   0.6 is sped up, by 0.05 steps, up to ×1.25. If the result is shorter than `min_duration_s`,
   ramps are removed.
 - **Loop ending.** The last segment is shortened to end on its energy peak (second half), if it
-  stays ≥ 1.5 s and the Short stays ≥ `min_duration_s`. The render then crossfades the last
-  0.3 s into the opening frame, so the replay is seamless. Replays count as views on Shorts.
+  stays ≥ 1.5 s and the Short stays ≥ `min_duration_s`. In highlight mode the render then
+  crossfades the last 0.3 s into the opening frame, so the replay is seamless. Replays count as
+  views on Shorts.
 - **Punch-in.** Cuts containing a rev peak get a smooth zoom from 1.0 to the per-video
   `punch_zoom` (1.05–1.10). Without revs, every other cut zooms, starting with the opener.
 
@@ -153,6 +157,10 @@ Captions are an ASS file burned in by ffmpeg's `ass` filter. Layout constants ar
 | `karaoke` | 1–3 uppercase words on screen (≤ 16 characters); the word being spoken is in the accent colour; each cue pops in. A new cue starts on a 0.45 s pause or after punctuation. |
 | `minimal` | Plain phrases of up to 7 words / 34 characters, smaller (62 % size). |
 | `none` | No captions. |
+
+Arabic and other right-to-left text is written in logical order and shaped by libass
+(fribidi/HarfBuzz). If `caption_font` has no Arabic glyphs, fontconfig substitutes one that
+has: install a font such as Noto Sans Arabic on the render machine.
 
 The **hook** line (from Gemini, ≤ 40 characters) shows for the first 2.5 s in the upper part,
 in a semi-opaque box, with a fade and pop. It needs `hook_text = true` and an LLM hook.
@@ -210,6 +218,9 @@ call-to-action line and fallback titles are picked per item key. See
 
 ## Look and audio
 
+- **HDR phone footage** (HLG `arib-std-b67` or PQ `smpte2084`) is tonemapped to SDR BT.709
+  first: `zscale` + Hable tonemapping when the ffmpeg build has `zscale`, else a faster
+  `colorspace` conversion. Every output is tagged BT.709.
 - **Grade** (`color_grade`): light denoise, contrast ×1.06, saturation ×1.15, gamma 1.04 to
   lift night shadows, mild sharpening.
 - **Fades**: `fade_s` (0.2 s) in and out, unless the Short loops: a loop must not dip to black.

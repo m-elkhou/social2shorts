@@ -11,9 +11,17 @@ from social2shorts.montage.filters import escape_filter_path
 S = MontageSettings(width=1080, height=1920, fps=30)
 
 
-def _plan(reframe: str | None = "crop", audio: bool = True, music: str | None = None) -> EditPlan:
+def _plan(
+    reframe: str | None = "crop", audio: bool = True, music: str | None = None, transfer: str = ""
+) -> EditPlan:
     info = MediaInfo(
-        path="/in/ride.mp4", duration=30, width=1920, height=1080, fps=30, has_audio=audio
+        path="/in/ride.mp4",
+        duration=30,
+        width=1920,
+        height=1080,
+        fps=30,
+        has_audio=audio,
+        color_transfer=transfer,
     )
     cuts = [Cut(start=10, end=12, zoom=1.08), Cut(start=1, end=4, speed=1.2), Cut(start=5, end=7)]
     return EditPlan(source=info, cuts=cuts, crop_x=0.4, reframe=reframe, music=music)
@@ -103,3 +111,22 @@ def test_loop_crossfade_into_opening_frame() -> None:
     cmd = build_command(plan, "/out/x.mp4", S)
     assert cmd.count("-i") == 5 and cmd[cmd.index("-stream_loop") - 5] == "10.000"
     assert "xfade" not in graph(_plan(), S)
+
+
+def test_hdr_is_tonemapped_to_sdr() -> None:
+    hlg = _plan(transfer="arib-std-b67").model_copy(update={"loop_s": 0.3})
+    g = graph(hlg, S, zscale=True)
+    assert g.count("zscale=tin=arib-std-b67:") == 4  # every cut + the loop still
+    assert "tonemap=hable:desat=0" in g and "zscale=t=bt709:m=bt709:r=tv" in g
+    assert g.index("zscale") < g.index("setpts")  # tonemap before any other processing
+    fallback = graph(_plan(transfer="smpte2084"), S, zscale=False)
+    assert "colorspace=all=bt709:iall=bt2020" in fallback and "zscale" not in fallback
+    sdr = graph(_plan(transfer="bt709"), S, zscale=True)
+    assert "zscale" not in sdr and "colorspace=" not in sdr
+
+
+def test_output_always_tagged_bt709() -> None:
+    for plan in (_plan(), _plan(transfer="arib-std-b67")):
+        cmd = build_command(plan, "/out/x.mp4", S)
+        for flag in ("-color_primaries", "-color_trc", "-colorspace"):
+            assert cmd[cmd.index(flag) + 1] == "bt709"
