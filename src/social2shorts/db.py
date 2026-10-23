@@ -311,9 +311,9 @@ class Store:
         item = self.item(key)
         return item.attempts if item else 0
 
-    def reset_attempts(self, key: str) -> None:
-        """Give a (human-approved) item a fresh retry budget."""
-        self._update(key, "attempts = 0")
+    def set_attempts(self, key: str, attempts: int) -> None:
+        """Set the failed-attempt counter (0 = fresh retry budget after a human approval)."""
+        self._update(key, "attempts = ?", attempts)
 
     def _update(self, key: str, assignment: str, *args: object) -> None:
         with self._tx() as c:

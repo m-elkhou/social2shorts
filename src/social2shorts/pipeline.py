@@ -6,6 +6,7 @@ Per item: dedupe -> prepare (catalog: audio gate, reference download, match | ra
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import logging
 import os
@@ -23,7 +24,8 @@ from social2shorts.config import Settings
 from social2shorts.curate import curate
 from social2shorts.db import Store
 from social2shorts.match import index_originals, match_one
-from social2shorts.media import LocalMedia
+from social2shorts.lock import AlreadyRunning, single_instance
+from social2shorts.media import LocalMedia, content_hash
 from social2shorts.models import (
     Item,
     ItemStatus,
@@ -62,6 +64,8 @@ from social2shorts.sources.tiktok_instagram import SocialCatalog
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+SYSTEMIC_FAILURES = 3  # same error on this many items in a row = system fault, stop the run
+LOCK_NAME = "social2shorts.lock"
 GUARD_LOOKBACK = timedelta(days=3)
 AUTH_ALERT = (
     "YouTube authorization failed ({}). Uploads are paused: run `uv run social2shorts auth` "
@@ -176,8 +180,12 @@ class Run:
     @functools.cached_property
     def originals(self) -> list[Original]:
         """Phone originals (synced and indexed once per run, only if a match is needed)."""
-        paths = self.deps.originals.sync(Path(self.settings.originals_dir))
-        return index_originals(paths, self.store, self.deps.media, self.settings.phash_frames)
+        try:
+            paths = self.deps.originals.sync(Path(self.settings.originals_dir))
+            return index_originals(paths, self.store, self.deps.media, self.settings.phash_frames)
+        except Exception as exc:  # cached either way: never re-synced once per item
+            log.error("Could not load the phone originals (%s); catalog posts wait", exc)
+            return []
 
     def done(self) -> int:
         """Items counted against ``limit``."""
@@ -193,24 +201,30 @@ def _eligible(item: Item, dry_run: bool) -> bool:
     return item.status in open_statuses or (item.status is ItemStatus.rendered and not dry_run)
 
 
+@dataclass(frozen=True)
+class Source:
+    """The file to render and how hard the montage engine should edit it."""
+
+    path: Path
+    mode: MontageMode
+
+
 class SourceStrategy(Protocol):
     """How one source kind refreshes, orders and prepares its items."""
 
     kind: SourceKind
-    montage_mode: MontageMode
 
     def refresh(self, run: Run) -> None: ...
 
     def candidates(self, run: Run) -> list[Item]: ...
 
-    def prepare(self, run: Run, item: Item) -> Path | None: ...
+    def prepare(self, run: Run, item: Item) -> Source | None: ...
 
 
 class CatalogStrategy:
-    """Published posts: best engagement first, rendered from the matched phone original."""
+    """Published posts: best engagement first, polished from the matched phone original."""
 
     kind = SourceKind.catalog
-    montage_mode = MontageMode.polish
 
     def refresh(self, run: Run) -> None:
         """Discover posts on the configured profiles and upsert them."""
@@ -226,34 +240,36 @@ class CatalogStrategy:
         shortlist = curate(entries, s.min_duration_s, s.sources.prefer_platform)
         return ready + [items[e.source_id] for e in shortlist]
 
-    def prepare(self, run: Run, item: Item) -> Path | None:
-        """The phone original to render, or None when the item was routed to review/pending."""
+    def prepare(self, run: Run, item: Item) -> Source | None:
+        """The phone original, or None when the item was routed to review/pending."""
         if item.source_path and Path(item.source_path).is_file():
-            return Path(item.source_path)
+            return Source(Path(item.source_path), MontageMode.polish)
         entry = item.entry
         assert entry is not None, "catalog items always have an entry"
         if not entry.is_original_audio and item.status is not ItemStatus.ready:
-            reason = (
+            _to_review(
+                run, item, ItemStatus.review_audio, ReviewKind.audio,
                 f"licensed music ({entry.track} - {entry.artist}). If you own the rights or it "
-                f"is royalty-free: review --approve {item.key}"
-            )
-            return _to_review(run, item, ItemStatus.review_audio, ReviewKind.audio, reason)
+                f"is royalty-free: review --approve {item.key}",
+            )  # fmt: skip
+            return None
         s = run.settings
         m = match_one(entry, run.originals, _ref_phashes(run, item), s.duration_tol_s,
                       s.phash_threshold)  # fmt: skip
         run.store.set_match(m)
         if m.status is ItemStatus.ambiguous:
-            reason = (
+            _to_review(
+                run, item, ItemStatus.ambiguous, ReviewKind.ambiguous,
                 f"{len(m.candidates)} phone originals look like this post. Pick one: "
-                f"review --approve {item.key} --original <path>"
-            )
-            return _to_review(run, item, ItemStatus.ambiguous, ReviewKind.ambiguous, reason)
+                f"review --approve {item.key} --original <path>",
+            )  # fmt: skip
+            return None
         if m.status is not ItemStatus.matched or m.original_path is None:
             run.store.set_status(item.key, ItemStatus.pending_original)
             run.report.pending.append(item.key)
             return None
         run.store.set_source(item.key, m.original_path)
-        return Path(m.original_path)
+        return Source(Path(m.original_path), MontageMode.polish)
 
 
 def _ref_phashes(run: Run, item: Item) -> list[str]:
@@ -266,16 +282,15 @@ def _ref_phashes(run: Run, item: Item) -> list[str]:
     try:
         phashes = run.deps.media.phashes(ref, run.settings.phash_frames)
     finally:
-        ref.unlink(missing_ok=True)
+        _remove(ref)
     run.store.cache_ref(item.key, phashes)
     return phashes
 
 
 class RawStrategy:
-    """Never-published inbox footage: re-cut into highlights by the montage engine."""
+    """Never-published inbox footage: long clips are re-cut into highlights, short ones polished."""
 
     kind = SourceKind.raw
-    montage_mode = MontageMode.highlight
 
     def refresh(self, run: Run) -> None:
         """Register new inbox files (deduped by content hash)."""
@@ -287,8 +302,8 @@ class RawStrategy:
         items = [i for i in run.store.items(self.kind) if _eligible(i, run.options.dry_run)]
         return sorted(items, key=lambda i: i.status is not ItemStatus.ready)
 
-    def prepare(self, run: Run, item: Item) -> Path | None:
-        """The inbox file itself.
+    def prepare(self, run: Run, item: Item) -> Source | None:
+        """The inbox file, or None when it is too short (sent to review).
 
         Raises:
             FileNotFoundError: If the file was moved or deleted since it was registered.
@@ -296,7 +311,17 @@ class RawStrategy:
         path = Path(item.source_path or "")
         if not path.is_file():
             raise FileNotFoundError(f"{path} is no longer in the inbox")
-        return path
+        duration = run.deps.media.duration(path)
+        minimum = run.settings.min_duration_s
+        if duration < minimum and item.status is not ItemStatus.ready:
+            _to_review(
+                run, item, ItemStatus.too_short, ReviewKind.short,
+                f"{path.name} is too short ({duration:.1f}s < {minimum:.0f}s). To render it "
+                f"anyway: review --approve {item.key}; otherwise review --reject {item.key}",
+            )  # fmt: skip
+            return None
+        short = duration <= run.settings.montage.target_duration_s
+        return Source(path, MontageMode.polish if short else MontageMode.highlight)
 
 
 STRATEGIES: dict[SourceKind, SourceStrategy] = {
@@ -311,33 +336,67 @@ def _to_review(run: Run, item: Item, status: ItemStatus, kind: ReviewKind, reaso
     run.store.add_review(item.key, kind, reason)
     run.report.review.append(item.key)
     log.info("%s needs review: %s", item.key, reason)
-    return None
+
+
+def _remove(path: Path) -> None:
+    """Best-effort delete (on Windows a file can stay locked by a scanner or a player)."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        log.info("Could not delete %s (%s); it can be removed by hand", path, exc)
+
+
+def _already_uploaded(run: Run, item: Item) -> bool:
+    """Cheap check before any work: this item, its raw content, or a legacy ledger row."""
+    if run.store.has_upload(item.key):
+        return True
+    if item.kind is SourceKind.raw:
+        return run.store.is_content_uploaded(item.fingerprint)
+    return run.store.is_legacy_uploaded(item.fingerprint)
+
+
+def _skip_duplicate(run: Run, item: Item, why: str) -> None:
+    if item.status is not ItemStatus.uploaded:
+        run.store.set_status(item.key, ItemStatus.duplicate)
+    run.report.skipped.append(item.key)
+    log.info("Skipping %s: %s", item.key, why)
+
+
+def _hint(item: Item, source: Path) -> str:
+    """File name or post date: lets fallback titles mention the time of day."""
+    return item.entry.upload_date if item.entry else source.stem
 
 
 def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
-    """Take one item as far as it can go (shared by every source kind)."""
-    if run.store.is_uploaded(item.fingerprint):
-        if item.status is not ItemStatus.uploaded:
-            run.store.set_status(item.key, ItemStatus.duplicate)
-        run.report.skipped.append(item.key)
+    """Take one item as far as it can go (shared by every source kind).
+
+    Raises before the upload API call only; once YouTube accepted the video every later
+    problem is logged and recorded, never retried.
+    """
+    if _already_uploaded(run, item):
+        _skip_duplicate(run, item, "already on YouTube")
         return
     source = strategy.prepare(run, item)
     if source is None:
         return
-    words = run.deps.transcriber.transcribe(source)
+    sha = content_hash(source.path, run.store)
+    if run.store.is_content_uploaded(sha):
+        _skip_duplicate(run, item, f"{source.path.name} was already uploaded for another post")
+        return
+    words = run.deps.transcriber.transcribe(source.path)
     meta = generate_metadata(
         run.deps.llm,
         item.caption,
         " ".join(w.text for w in words),
         key=item.key,
         language=run.settings.youtube.language,
+        hint=_hint(item, source.path),
     )
-    montage = run.settings.montage.model_copy(update={"mode": strategy.montage_mode})
     out = run.deps.renderer.render(
-        source,
+        source.path,
         run.work_dir / "renders" / f"{item.key}.mp4",
         words=words,
-        settings=montage,
+        settings=run.settings.montage.model_copy(update={"mode": source.mode}),
         hook=meta.hook or None,
     )
     if run.options.dry_run:
@@ -345,38 +404,37 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
         run.report.rendered.append(item.key)
         log.info("Rendered %s -> %s (%r)", item.key, out, meta.title)
         return
-    upload = _upload(run, item, out, meta)
-    out.unlink(missing_ok=True)
+    upload = _upload(run, item, out, meta, sha)
     _guard(run, [upload])
+    _remove(out)
 
 
-def _upload(run: Run, item: Item, video: Path, meta: ShortMeta) -> Upload:
-    """Upload, then write the ledger immediately so a later failure never causes a re-upload."""
-    privacy, publish_at = run.options.privacy.value, None
-    if run.options.privacy is Privacy.scheduled:
-        now = run.deps.clock()
-        privacy, publish_at = (
-            "private",
-            next_slot(now, run.store.publish_times(), run.settings.schedule),
-        )
+def _publish_target(run: Run) -> tuple[str, datetime | None]:
+    if run.options.privacy is not Privacy.scheduled:
+        return run.options.privacy.value, None
+    return "private", next_slot(run.deps.clock(), run.store.publish_times(), run.settings.schedule)
+
+
+def _upload(run: Run, item: Item, video: Path, meta: ShortMeta, sha: str) -> Upload:
+    """Upload, then record it immediately. Only failures of the API call itself propagate."""
+    privacy, publish_at = _publish_target(run)
     cost = run.settings.youtube.upload_cost_units
+    run.store.set_status(item.key, ItemStatus.uploading)
     try:
         result = run.deps.platform.upload(video, meta, privacy=privacy, publish_at=publish_at)
-    except QuotaExceededError:
-        run.budget.exhaust()
-        raise
-    except AuthRefreshError:
-        raise
-    except Exception:
-        run.budget.spend(cost, uploads=1)  # a failed insert may still be charged: be conservative
+    except Exception as exc:  # the API said no (Ctrl-C keeps 'uploading': a human checks)
+        run.store.set_status(item.key, item.status)
+        if isinstance(exc, QuotaExceededError):
+            run.budget.exhaust()
+        elif not isinstance(exc, AuthRefreshError):
+            run.budget.spend(cost, uploads=1)  # one conservative charge per failed insert
         raise
     upload = Upload(
         youtube_id=result.video_id, item_key=item.key, fingerprint=item.fingerprint,
-        privacy=result.privacy, publish_at=result.publish_at, uploaded_at=run.deps.clock(),
-        quota_units=cost,
+        content_sha256=sha, privacy=result.privacy, publish_at=result.publish_at,
+        uploaded_at=run.deps.clock(), quota_units=cost,
     )  # fmt: skip
-    run.store.record_upload(upload)
-    run.budget.spend(cost, uploads=1)
+    _record(run, item, upload)
     if (result.privacy, result.publish_at) != (privacy, publish_at):
         asked = f"{privacy} at {publish_at:%Y-%m-%d %H:%M} UTC" if publish_at else privacy
         log.warning(
@@ -384,11 +442,27 @@ def _upload(run: Run, item: Item, video: Path, meta: ShortMeta) -> Upload:
             "request an API audit, or publish it by hand in YouTube Studio.",
             item.key, result.privacy, asked,
         )  # fmt: skip
-    run.store.set_status(item.key, ItemStatus.uploaded)
-    run.store.resolve_review(item.key)
-    run.report.uploaded.append(upload)
     log.info("Uploaded %s as https://youtu.be/%s (%s)", item.key, result.video_id, result.privacy)
     return upload
+
+
+def _record(run: Run, item: Item, upload: Upload) -> None:
+    """Write the ledger; if the DB fails, shout (the item stays 'uploading', never retried)."""
+    run.report.uploaded.append(upload)
+    try:
+        run.store.record_upload(upload)
+        run.store.set_status(item.key, ItemStatus.uploaded)
+        run.store.resolve_review(item.key)
+        run.budget.spend(upload.quota_units, uploads=1)
+    except Exception as exc:
+        message = (
+            f"{item.key} WAS UPLOADED as https://youtu.be/{upload.youtube_id} but could not be "
+            f"recorded ({exc}). It will not be retried; fix the database, then check it in "
+            "YouTube Studio."
+        )
+        log.critical(message)
+        with contextlib.suppress(Exception):
+            run.store.add_alert(message)
 
 
 def _guard(run: Run, uploads: list[Upload]) -> None:
@@ -423,7 +497,8 @@ def _privatize(run: Run, upload: Upload, reason: str) -> None:
         upload.item_key,
         ReviewKind.claim,
         f"made private: {reason}. Check YouTube Studio; if it is fine run "
-        f"`publish {upload.item_key}`, otherwise `review --reject {upload.item_key}`.",
+        f"`publish {upload.item_key} --privacy public --include-claimed`, otherwise "
+        f"`review --reject {upload.item_key}`.",
     )
     run.report.claimed.append(upload.item_key)
     log.warning("%s (%s) flagged and made private: %s", upload.item_key, upload.youtube_id, reason)
@@ -440,24 +515,61 @@ def _sweep_recent(run: Run) -> None:
     _guard(run, recent)
 
 
+def _recover_interrupted(run: Run) -> None:
+    """Items left 'uploading' by a crashed run may be on YouTube: a human must check."""
+    for item in run.store.items():
+        if item.status is ItemStatus.uploading:
+            _to_review(
+                run, item, ItemStatus.failed, ReviewKind.interrupted,
+                "a previous run stopped while uploading this video. Look for it in YouTube "
+                f"Studio: if it is there, `review --reject {item.key}`; if not, "
+                f"`review --approve {item.key}`.",
+            )  # fmt: skip
+            run.store.set_attempts(item.key, MAX_ATTEMPTS)  # no automatic retry
+
+
 def _fail(run: Run, item: Item, exc: Exception) -> None:
     """Count a failed attempt; after MAX_ATTEMPTS the item goes to review."""
     attempts = run.store.add_attempt(item.key)
-    reason = f"{type(exc).__name__}: {exc}"
+    reason = _signature(exc)
     log.warning("%s failed (attempt %d/%d): %s", item.key, attempts, MAX_ATTEMPTS, reason)
     if attempts >= MAX_ATTEMPTS:
-        run.store.set_status(item.key, ItemStatus.failed)
-        run.store.add_review(
-            item.key,
-            ReviewKind.error,
+        _to_review(
+            run, item, ItemStatus.failed, ReviewKind.error,
             f"gave up after {attempts} attempts: {reason}. Fix the cause, then "
             f"`review --approve {item.key}` to retry.",
-        )
-        run.report.review.append(item.key)
+        )  # fmt: skip
         return
     keep = ItemStatus.ready if item.status is ItemStatus.ready else ItemStatus.failed
     run.store.set_status(item.key, keep)
     run.report.failed.append(item.key)
+
+
+def _signature(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+@dataclass
+class FailureStreak:
+    """Consecutive identical failures. Penalties are deferred: if the same error hits
+    ``SYSTEMIC_FAILURES`` items in a row it is a system fault (no network, model download
+    failed...) and no item is blamed."""
+
+    run: Run
+    failures: list[tuple[Item, Exception]] = field(default_factory=list)
+
+    def add(self, item: Item, exc: Exception) -> bool:
+        """Record a failure; True when the run should stop (systemic fault)."""
+        if self.failures and _signature(self.failures[-1][1]) != _signature(exc):
+            self.settle()
+        self.failures.append((item, exc))
+        return len(self.failures) >= SYSTEMIC_FAILURES
+
+    def settle(self) -> None:
+        """Charge the pending failures to their items (they were item-specific)."""
+        for item, exc in self.failures:
+            _fail(self.run, item, exc)
+        self.failures.clear()
 
 
 def _queue(run: Run, kinds: list[SourceKind]) -> Iterator[tuple[SourceStrategy, Item]]:
@@ -471,10 +583,50 @@ def _queue(run: Run, kinds: list[SourceKind]) -> Iterator[tuple[SourceStrategy, 
         yield from (pair for pair in group if pair is not None)
 
 
+def _quota_stop(run: Run) -> str | None:
+    budget, yt = run.budget, run.settings.youtube
+    if run.options.dry_run or budget.uploads_left(yt.upload_cost_units) > 0:
+        return None
+    return (
+        f"daily YouTube quota spent ({budget.used()}/{budget.daily_units} units, "
+        f"{budget.uploads()}/{budget.max_uploads} uploads); the next run after midnight "
+        "Pacific time continues"
+    )
+
+
+def _process_queue(run: Run, kinds: list[SourceKind]) -> None:
+    report, streak = run.report, FailureStreak(run)
+    for strategy, item in _queue(run, kinds):
+        if run.options.limit is not None and run.done() >= run.options.limit:
+            break
+        if stop := _quota_stop(run):
+            report.stop_reason = stop
+            break
+        try:
+            process_item(run, strategy, item)
+        except (AuthRefreshError, QuotaExceededError, ScheduleFull):
+            streak.settle()
+            raise
+        except Exception as exc:
+            if streak.add(item, exc):
+                report.stop_reason = (
+                    f"{SYSTEMIC_FAILURES} videos in a row failed with the same error "
+                    f"({_signature(exc)}). This looks like a system problem, not the videos: "
+                    "fix it and run again (no video was penalized)"
+                )
+                run.store.add_alert(report.stop_reason)
+                log.error(report.stop_reason)
+                return
+            continue
+        streak.settle()
+    streak.settle()
+
+
 def run_pipeline(settings: Settings, deps: PipelineDeps, options: RunOptions) -> RunReport:
     """Process items until the limit, the daily quota or the queue runs out.
 
     Never raises for per-item problems; an OAuth failure stops the run and records an alert.
+    Only one run at a time: a second one stops immediately with a ``stop_reason``.
     """
     Path(settings.work_dir).mkdir(parents=True, exist_ok=True)
     store = Store(settings.db_path)
@@ -485,24 +637,13 @@ def run_pipeline(settings: Settings, deps: PipelineDeps, options: RunOptions) ->
     report = run.report
     kinds = [k for k in SourceKind if options.source in (SourceChoice.all, k.value)]
     try:
-        if not options.dry_run:
-            _sweep_recent(run)
-        for strategy, item in _queue(run, kinds):
-            if options.limit is not None and run.done() >= options.limit:
-                break
-            if not options.dry_run and budget.uploads_left(yt.upload_cost_units) <= 0:
-                report.stop_reason = (
-                    f"daily YouTube quota spent ({budget.used()}/{budget.daily_units} units, "
-                    f"{budget.uploads()}/{budget.max_uploads} uploads); the next run after "
-                    "midnight Pacific time continues"
-                )
-                break
-            try:
-                process_item(run, strategy, item)
-            except (AuthRefreshError, QuotaExceededError, ScheduleFull):
-                raise
-            except Exception as exc:
-                _fail(run, item, exc)
+        with single_instance(Path(settings.work_dir) / LOCK_NAME):
+            _recover_interrupted(run)
+            if not options.dry_run:
+                _sweep_recent(run)
+            _process_queue(run, kinds)
+    except AlreadyRunning as exc:
+        report.stop_reason = f"{exc}; this run did nothing"
     except AuthRefreshError as exc:
         report.alert = AUTH_ALERT.format(exc)
         store.add_alert(report.alert)

@@ -237,7 +237,13 @@ def review(
 @app.command()
 def publish(
     target: Annotated[str, typer.Argument(help="Item key, or 'all'.")],
-    privacy: Annotated[Privacy, typer.Option()] = Privacy.public,
+    privacy: Annotated[Privacy, typer.Option(help="Required: public, unlisted or private.")],
+    include_claimed: Annotated[
+        bool, typer.Option(help="Also change videos the Content-ID guard made private.")
+    ] = False,
+    include_scheduled: Annotated[
+        bool, typer.Option(help="Also change videos still waiting for their publish time.")
+    ] = False,
     config: ConfigOpt = DEFAULT_CONFIG,
 ) -> None:
     """Change the visibility of uploaded video(s), e.g. unlisted -> public after review."""
@@ -249,16 +255,24 @@ def publish(
     yt = settings.youtube
     budget = QuotaBudget(store, yt.daily_quota_units, deps.clock, yt.max_uploads_per_day)
     try:
-        result = operations.publish(store, deps.platform, budget, target, privacy.value)
+        result = operations.publish(
+            store, deps.platform, budget, target, privacy.value,
+            include_claimed=include_claimed, include_scheduled=include_scheduled,
+        )  # fmt: skip
     except operations.ActionError as exc:
         _fail(str(exc))
     except AuthRefreshError as exc:
         _fail(f"YouTube authorization failed ({exc}). Run `social2shorts auth` and retry.", 2)
     for key in result.done:
         console.print(f"{key} -> {privacy.value}")
+    for key, why in result.excluded:
+        console.print(f"[yellow]{key} left unchanged: {why}[/yellow]")
     for key, why in result.failed:
         console.print(f"[red]{key} failed: {why}[/red]")
-    console.print(f"Succeeded: {len(result.done)}, failed: {len(result.failed)}")
+    console.print(
+        f"Succeeded: {len(result.done)}, failed: {len(result.failed)}, "
+        f"left unchanged: {len(result.excluded)}"
+    )
     if result.failed:
         raise typer.Exit(1)
 

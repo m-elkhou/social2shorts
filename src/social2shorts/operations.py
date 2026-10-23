@@ -9,7 +9,7 @@ from pathlib import Path
 
 from social2shorts.config import Settings
 from social2shorts.db import Store
-from social2shorts.models import ItemStatus, MatchResult
+from social2shorts.models import ItemStatus, MatchResult, Upload
 from social2shorts.ports import VideoPlatform
 from social2shorts.publish.quota import QuotaBudget
 from social2shorts.publish.scheduler import upcoming_slots
@@ -54,7 +54,7 @@ def approve(store: Store, key: str, original: Path | None = None) -> str:
             f"{key} matches several originals. Choose one with --original <path>:\n  {options}"
         )
     store.set_status(key, ItemStatus.ready)
-    store.reset_attempts(key)
+    store.set_attempts(key, 0)
     store.resolve_review(key)
     return f"{key} approved: it will be processed first on the next run."
 
@@ -78,10 +78,50 @@ class PublishResult:
 
     done: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
+    excluded: list[tuple[str, str]] = field(default_factory=list)
+
+
+def select_uploads(
+    store: Store,
+    target: str,
+    now: datetime,
+    *,
+    include_claimed: bool = False,
+    include_scheduled: bool = False,
+) -> tuple[list[Upload], list[tuple[str, str]]]:
+    """Uploads to change, and the ones left out with the reason.
+
+    Claimed videos (made private by the Content-ID guard) and videos waiting for their
+    scheduled ``publishAt`` are left out unless explicitly included.
+
+    Raises:
+        ActionError: If nothing matches ``target``.
+    """
+    uploads = [u for u in store.uploads() if target == "all" or u.item_key == target]
+    if not uploads:
+        raise ActionError(f"No upload found for {target!r}. `social2shorts status` lists uploads.")
+    claimed = {i.key for i in store.items() if i.status is ItemStatus.claimed}
+    selected, excluded = [], []
+    for u in uploads:
+        if u.item_key in claimed and not include_claimed:
+            excluded.append((u.item_key, "flagged by the Content-ID guard (--include-claimed)"))
+        elif u.publish_at and u.publish_at > now and not include_scheduled:
+            excluded.append((u.item_key, f"scheduled for {u.publish_at:%Y-%m-%d %H:%M} UTC "
+                                         "(--include-scheduled)"))  # fmt: skip
+        else:
+            selected.append(u)
+    return selected, excluded
 
 
 def publish(
-    store: Store, platform: VideoPlatform, budget: QuotaBudget, target: str, privacy: str
+    store: Store,
+    platform: VideoPlatform,
+    budget: QuotaBudget,
+    target: str,
+    privacy: str,
+    *,
+    include_claimed: bool = False,
+    include_scheduled: bool = False,
 ) -> PublishResult:
     """Set the visibility of one item's upload (or ``all`` uploads), within today's quota.
 
@@ -89,11 +129,12 @@ def publish(
         ActionError: If nothing matches ``target``.
         AuthRefreshError: If YouTube authorization fails.
     """
-    uploads = [u for u in store.uploads() if target == "all" or u.item_key == target]
-    if not uploads:
-        raise ActionError(f"No upload found for {target!r}. `social2shorts status` lists uploads.")
-    result = PublishResult()
-    for u in uploads:
+    selected, excluded = select_uploads(
+        store, target, budget.clock(),
+        include_claimed=include_claimed, include_scheduled=include_scheduled,
+    )  # fmt: skip
+    result = PublishResult(excluded=excluded)
+    for u in selected:
         if not budget.can_afford(COST_UPDATE):
             result.failed.append((u.item_key, "daily quota spent, retry tomorrow"))
             continue
@@ -107,8 +148,8 @@ def publish(
             continue
         budget.spend(COST_UPDATE)
         store.set_upload_privacy(u.youtube_id, privacy)
-        if store.item(u.item_key) and privacy != "private":
-            store.set_status(u.item_key, ItemStatus.uploaded)
+        if privacy != "private" and store.item(u.item_key):
+            store.set_status(u.item_key, ItemStatus.uploaded)  # a human cleared it
             store.resolve_review(u.item_key)
         result.done.append(u.item_key)
     return result
