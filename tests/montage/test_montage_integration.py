@@ -68,8 +68,13 @@ def test_highlight_with_words_and_hook(clips, tmp_path, fast_settings) -> None:
     _check(result, fast_settings)
     assert result.plan.cuts[0].reason.startswith("hook")
     assert result.plan.loop_s > 0
-    first, last, mid = (_gray(result.path, t) for t in (0, result.duration - 0.05, 3.0))
-    assert np.abs(first - last).mean() < 0.5 * np.abs(first - mid).mean()  # seamless loop
+    # seamless loop: the last frame is much closer to the opening than the frame just before
+    # the crossfade (the last cut's own content)
+    end = result.duration
+    first, last, before = (
+        _gray(result.path, t) for t in (0, end - 0.05, end - result.plan.loop_s - 0.4)
+    )
+    assert np.abs(first - last).mean() < 0.5 * np.abs(first - before).mean()
     assert len(result.plan.cuts) >= 3
     assert not list(tmp_path.glob("*.ass"))
 
@@ -109,9 +114,10 @@ def test_hdr_hlg_10bit_is_tonemapped(tmp_path, fast_settings) -> None:
     src = tmp_path / "hlg.mp4"
     subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30",
-         "-t", "5", "-vf", "format=yuv420p10le", "-c:v", "libx264", "-preset", "ultrafast",
-         "-color_trc", "arib-std-b67", "-color_primaries", "bt2020", "-colorspace", "bt2020nc",
-         str(src)],
+         "-t", "5", "-vf",
+         "format=yuv420p10le,setparams=color_trc=arib-std-b67:color_primaries=bt2020"
+         ":colorspace=bt2020nc",
+         "-c:v", "libx264", "-preset", "ultrafast", str(src)],
         check=True,
     )  # fmt: skip
     assert probe(str(src)).is_hdr

@@ -59,16 +59,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install ffmpeg
-        timeout-minutes: 8
+      # Static build from GitHub releases: seconds to fetch (the Ubuntu mirror can stall for
+      # minutes) and close to the recent ffmpeg a Windows user installs.
+      - name: Install ffmpeg (static build)
+        timeout-minutes: 5
         run: |
-          for attempt in 1 2 3; do
-            sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update \
-              && sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg \
-              && exit 0
-            echo "apt attempt $attempt failed, retrying"; sleep 10
-          done
-          exit 1
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/ffmpeg.tar.xz" \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ffmpeg-master-latest-linux64-gpl/bin" >> "$GITHUB_PATH"
+      - run: ffmpeg -hide_banner -version | head -1
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true

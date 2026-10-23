@@ -18,6 +18,8 @@ HDR_ZSCALE = (
 )
 HDR_FALLBACK = "colorspace=all=bt709:iall=bt2020:fast=1:format=yuv420p"  # no zscale build
 SDR_TAGS = ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+# ffmpeg 8 takes colour tags from the frames, not the -color_* flags: stamp them in the graph too.
+SDR_PARAMS = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
 
 
 def escape_filter_path(path: str) -> str:
@@ -168,14 +170,15 @@ def build_filter_graph(
     fade_out = max(d - s.fade_s, 0)
     if s.fade_s > 0 and not loop:  # a loop must not dip to black
         video.append(f"fade=t=in:st=0:d={s.fade_s},fade=t=out:st={fade_out:.3f}:d={s.fade_s}")
-    vlabel = "[vbar]" if s.progress_bar else "[vout]"
+    vlabel = "[vbar]" if s.progress_bar else "[vtag]"
     parts.append(video[0] + (",".join(video[1:]) or "null") + vlabel)
     if s.progress_bar:
         bar_h = max(4, s.height // 240)
         parts.append(
             f"color=c={_accent_hex(plan.variation.accent)}@0.9:s={s.width}x{bar_h}:r={s.fps}:d={d:.3f}[bar];"
-            f"[vbar][bar]overlay=x='-w+W*t/{d:.3f}':y=H-{bar_h}:eval=frame:eof_action=pass,format=yuv420p[vout]"
+            f"[vbar][bar]overlay=x='-w+W*t/{d:.3f}':y=H-{bar_h}:eval=frame:eof_action=pass,format=yuv420p[vtag]"
         )
+    parts.append(f"[vtag]{SDR_PARAMS}[vout]")
 
     loud = f"loudnorm=I={s.loudness_lufs:g}:TP=-1.5:LRA=11,aresample=48000"
     if loop:  # audio from frame 0; tail eases out under the visual crossfade

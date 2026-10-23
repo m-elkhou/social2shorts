@@ -122,7 +122,7 @@ def test_hdr_is_tonemapped_to_sdr() -> None:
     fallback = graph(_plan(transfer="smpte2084"), S, zscale=False)
     assert "colorspace=all=bt709:iall=bt2020" in fallback and "zscale" not in fallback
     sdr = graph(_plan(transfer="bt709"), S, zscale=True)
-    assert "zscale" not in sdr and "colorspace=" not in sdr
+    assert "zscale" not in sdr and "colorspace=all" not in sdr
 
 
 def test_output_always_tagged_bt709() -> None:
@@ -130,3 +130,5 @@ def test_output_always_tagged_bt709() -> None:
         cmd = build_command(plan, "/out/x.mp4", S)
         for flag in ("-color_primaries", "-color_trc", "-colorspace"):
             assert cmd[cmd.index(flag) + 1] == "bt709"
+        # ffmpeg 8 ignores the flags above unless the frames carry the tags too
+        assert "setparams=color_primaries=bt709" in graph(plan, S)
