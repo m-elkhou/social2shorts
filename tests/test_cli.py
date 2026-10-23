@@ -1,168 +1,142 @@
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+from fakes import entry
 from typer.testing import CliRunner
 
 from social2shorts import cli
 from social2shorts.cli import app
 from social2shorts.db import Store
-from social2shorts.models import CatalogEntry, ItemStatus, Platform
-from social2shorts.pipeline import PipelineDeps, RunReport
+from social2shorts.models import ItemStatus, Privacy, ReviewKind, Upload
+from social2shorts.pipeline import RunReport, SourceChoice
+from social2shorts.publish.quota import quota_day
 
 runner = CliRunner()
 
 
-def _cfg(tmp_path):
+def _cfg(tmp_path, extra: str = ""):
     p = tmp_path / "config.toml"
-    p.write_text(
-        'tiktok_profile_url = "u"\nyoutube_handle = "h"\n'
-        f'originals_dir = "{(tmp_path / "o").as_posix()}"\n'
-        f'work_dir = "{(tmp_path / "w").as_posix()}"\n'
-        f'db_path = "{(tmp_path / "db.sqlite").as_posix()}"\n'
-    )
-    return str(p), Store(str(tmp_path / "db.sqlite"))
+    p.write_text(f'db_path = "{(tmp_path / "db.sqlite").as_posix()}"\n'
+                 f'work_dir = "{(tmp_path / "w").as_posix()}"\n{extra}')  # fmt: skip
+    store = Store(tmp_path / "db.sqlite")
+    store.init_schema()
+    return str(p), store
 
 
-def _entry(sid):
-    return CatalogEntry(platform=Platform.tiktok, source_id=sid, url="u", caption="c",
-                        duration=20, view_count=1, like_count=1, comment_count=0,
-                        upload_date="20260101", track="", artist="")
-
-
-def test_run_invokes_pipeline(monkeypatch, tmp_path):
-    cfg, _ = _cfg(tmp_path)
+def _patch_run(monkeypatch, report: RunReport | None = None) -> dict:
     called = {}
 
-    def fake(*a, **k):
-        called["args"] = a
-        return RunReport(uploaded=[{"source_id": "A", "youtube_id": "y"}])
+    def fake(settings, deps, options):
+        called["options"] = options
+        return report or RunReport()
 
-    monkeypatch.setattr(cli, "run_backlog", fake)
-    monkeypatch.setattr(PipelineDeps, "default", classmethod(lambda cls, s: object()))
-    monkeypatch.setattr(cli, "MtpPhoneSource", lambda *a, **k: object())
-    result = runner.invoke(app, ["run", "--limit", "3", "-c", cfg])
-    assert result.exit_code == 0 and called["args"][3] == 3 and called["args"][4] == "unlisted"
-
-
-def _patch_run(monkeypatch):
-    called = {}
-
-    def fake(*a, **k):
-        called["args"] = a
-        return RunReport()
-
-    monkeypatch.setattr(cli, "run_backlog", fake)
-    monkeypatch.setattr(PipelineDeps, "default", classmethod(lambda cls, s: object()))
-    monkeypatch.setattr(cli, "MtpPhoneSource", lambda *a, **k: object())
+    monkeypatch.setattr(cli, "run_pipeline", fake)
+    monkeypatch.setattr(cli.PipelineDeps, "default", classmethod(lambda cls, s: object()))
     return called
+
+
+def test_run_passes_options(monkeypatch, tmp_path):
+    cfg, _ = _cfg(tmp_path, '[youtube]\ndefault_privacy = "private"\n')
+    called = _patch_run(monkeypatch)
+    assert runner.invoke(app, ["run", "-c", cfg]).exit_code == 0
+    o = called["options"]
+    assert o.limit == 3 and o.privacy is Privacy.private and o.source is SourceChoice.all
+    args = ["run", "--source", "raw", "--privacy", "scheduled", "--continuous", "--dry-run"]
+    assert runner.invoke(app, [*args, "-c", cfg]).exit_code == 0
+    o = called["options"]
+    assert o.limit is None and o.privacy is Privacy.scheduled and o.dry_run
+    assert o.source is SourceChoice.raw
 
 
 def test_run_rejects_invalid_privacy(monkeypatch, tmp_path):
     cfg, _ = _cfg(tmp_path)
     called = _patch_run(monkeypatch)
-    result = runner.invoke(app, ["run", "--privacy", "bogus", "-c", cfg])
-    assert result.exit_code != 0 and "args" not in called
+    assert runner.invoke(app, ["run", "--privacy", "bogus", "-c", cfg]).exit_code != 0
+    assert "options" not in called
 
 
-def test_run_uses_config_default_privacy(monkeypatch, tmp_path):
+def test_run_alert_exits_2_and_explains(monkeypatch, tmp_path):
     cfg, _ = _cfg(tmp_path)
-    with open(cfg, "a") as f:
-        f.write('default_privacy = "private"\n')
-    called = _patch_run(monkeypatch)
-    assert runner.invoke(app, ["run", "-c", cfg]).exit_code == 0
-    assert called["args"][4] == "private"
-    called.clear()
-    assert runner.invoke(app, ["run", "--privacy", "public", "-c", cfg]).exit_code == 0
-    assert called["args"][4] == "public"
+    _patch_run(monkeypatch, RunReport(alert="YouTube authorization failed", review=["B"]))
+    r = runner.invoke(app, ["run", "-c", cfg])
+    assert r.exit_code == 2 and "ALERT" in r.output and "social2shorts review" in r.output
 
 
-def test_status_and_review(tmp_path):
+def test_missing_config_is_actionable(tmp_path):
+    r = runner.invoke(app, ["status", "-c", str(tmp_path / "nope.toml")])
+    assert r.exit_code == 1 and "config.example.toml" in r.output
+
+
+def test_review_list_approve_reject(tmp_path):
     cfg, store = _cfg(tmp_path)
-    store.init_schema()
-    store.upsert_catalog(_entry("A"))
-    store.add_review("A", "licensed music")
-    r = runner.invoke(app, ["status", "-c", cfg])
-    assert r.exit_code == 0 and "discovered" in r.output
+    store.upsert_catalog(entry("A"))
+    store.upsert_catalog(entry("B"))
+    store.add_review("A", ReviewKind.audio, "licensed music")
+    store.add_review("B", ReviewKind.audio, "licensed music")
     r = runner.invoke(app, ["review", "-c", cfg])
     assert r.exit_code == 0 and "licensed" in r.output
+    assert runner.invoke(app, ["review", "--approve", "A", "-c", cfg]).exit_code == 0
+    assert runner.invoke(app, ["review", "--reject", "B", "-c", cfg]).exit_code == 0
+    assert store.item("A").status is ItemStatus.ready
+    assert store.item("B").status is ItemStatus.rejected and store.reviews() == []
+    r = runner.invoke(app, ["review", "--approve", "nope", "-c", cfg])
+    assert r.exit_code == 1 and "Unknown item" in r.output
+
+
+def test_review_ambiguous_needs_original(tmp_path):
+    cfg, store = _cfg(tmp_path)
+    store.upsert_catalog(entry("A"))
+    store.set_status("A", ItemStatus.ambiguous)
     r = runner.invoke(app, ["review", "--approve", "A", "-c", cfg])
+    assert r.exit_code == 1 and "--original" in r.output
+    original = tmp_path / "A.mp4"
+    original.write_bytes(b"x")
+    r = runner.invoke(app, ["review", "--approve", "A", "--original", str(original), "-c", cfg])
     assert r.exit_code == 0
-    assert store.status_counts() == {ItemStatus.ready.value: 1}
+    assert store.item("A").source_path == str(original)
 
 
-def test_publish_calls_set_privacy(monkeypatch, tmp_path):
-    cfg, store = _cfg(tmp_path)
-    store.init_schema()
-    store.mark_uploaded("fp", "A", "yt1")
-    calls = []
-    monkeypatch.setattr(cli.youtube_upload, "set_privacy", lambda v, p: calls.append((v, p)))
-    r = runner.invoke(app, ["publish", "A", "-c", cfg])
-    assert r.exit_code == 0 and calls == [("yt1", "public")]
-    r = runner.invoke(app, ["publish", "nope", "-c", cfg])
-    assert r.exit_code == 1
+def _uploaded(store, key, vid):
+    store.record_upload(Upload(youtube_id=vid, item_key=key, fingerprint=f"fp{key}",
+                               privacy="unlisted", uploaded_at=datetime.now(UTC)))  # fmt: skip
 
 
-def test_publish_rejects_invalid_privacy(monkeypatch, tmp_path):
-    cfg, store = _cfg(tmp_path)
-    store.init_schema()
-    store.mark_uploaded("fp", "A", "yt1")
-    calls = []
-    monkeypatch.setattr(cli.youtube_upload, "set_privacy", lambda v, p: calls.append((v, p)))
-    r = runner.invoke(app, ["publish", "A", "--privacy", "publc", "-c", cfg])
-    assert r.exit_code != 0 and calls == []
+class Platform:
+    def __init__(self, fail_on=None):
+        self.calls, self.fail_on = [], fail_on
 
-
-def test_publish_all_continues_after_failure(monkeypatch, tmp_path):
-    cfg, store = _cfg(tmp_path)
-    store.init_schema()
-    store.mark_uploaded("f1", "A", "yt1")
-    store.mark_uploaded("f2", "B", "yt2")
-    calls = []
-
-    def fake(v, p):
-        calls.append(v)
-        if v == "yt1":
+    def set_privacy(self, vid, privacy):
+        self.calls.append((vid, privacy))
+        if vid == self.fail_on:
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli.youtube_upload, "set_privacy", fake)
-    r = runner.invoke(app, ["publish", "all", "-c", cfg])
-    assert calls == ["yt1", "yt2"] and r.exit_code == 1 and "Succeeded: 1, failed: 1" in r.output
+
+def _patch_platform(monkeypatch, platform):
+    deps = SimpleNamespace(platform=platform, clock=lambda: datetime.now(UTC))
+    monkeypatch.setattr(cli.PipelineDeps, "default", classmethod(lambda cls, s: deps))
 
 
-def test_review_approve_unknown_exits_1(tmp_path):
+def test_publish_one_and_all(monkeypatch, tmp_path):
     cfg, store = _cfg(tmp_path)
-    store.init_schema()
-    r = runner.invoke(app, ["review", "--approve", "nope", "-c", cfg])
-    assert r.exit_code == 1
+    _uploaded(store, "A", "yt1")
+    _uploaded(store, "B", "yt2")
+    platform = Platform(fail_on="yt1")
+    _patch_platform(monkeypatch, platform)
+    assert runner.invoke(app, ["publish", "all", "-c", cfg]).exit_code != 0  # --privacy required
+    r = runner.invoke(app, ["publish", "all", "--privacy", "public", "-c", cfg])
+    assert platform.calls == [("yt1", "public"), ("yt2", "public")]
+    assert r.exit_code == 1 and "Succeeded: 1, failed: 1" in r.output
+    assert [u.privacy for u in store.uploads()] == ["unlisted", "public"]
+    assert runner.invoke(app, ["publish", "nope", "--privacy", "public", "-c", cfg]).exit_code == 1
+    assert runner.invoke(app, ["publish", "A", "--privacy", "publc", "-c", cfg]).exit_code != 0
 
 
-def test_review_approve_removes_row(tmp_path):
+def test_status_and_schedule(tmp_path):
     cfg, store = _cfg(tmp_path)
-    store.init_schema()
-    store.upsert_catalog(_entry("A"))
-    store.add_review("A", "x")
-    r = runner.invoke(app, ["review", "--approve", "A", "-c", cfg])
-    assert r.exit_code == 0 and store.reviews() == []
-
-
-def test_ingest_limit_bounds_copy(monkeypatch, tmp_path):
-    from social2shorts.ingest import FakePhoneSource, PhoneVideo
-    cfg, _ = _cfg(tmp_path)
-    copied = []
-
-    class P:
-        def list_videos(self, folders):
-            return [PhoneVideo.__new__(PhoneVideo) for _ in range(3)]
-
-        def copy(self, name, dest):
-            copied.append(name)
-            return name
-
-    seen = {}
-
-    def fake_ingest(phone, folders, dest):
-        seen["n"] = len(phone.list_videos(folders))
-        return []
-
-    monkeypatch.setattr(cli, "MtpPhoneSource", lambda *a, **k: P())
-    monkeypatch.setattr(cli, "ingest_originals", fake_ingest)
-    for lim, n in (("2", 2), ("0", 0)):
-        r = runner.invoke(app, ["ingest", "--limit", lim, "-c", cfg])
-        assert r.exit_code == 0 and seen["n"] == n
+    store.upsert_catalog(entry("A"))
+    store.spend_quota(quota_day(datetime.now(UTC)), 3200, uploads=2)
+    r = runner.invoke(app, ["status", "-c", cfg])
+    assert r.exit_code == 0 and "discovered" in r.output and "3200/10000" in r.output
+    assert "room for 4 more upload" in r.output
+    r = runner.invoke(app, ["schedule", "--count", "2", "-c", cfg])
+    assert r.exit_code == 0 and r.output.count("free slot") == 2

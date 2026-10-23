@@ -1,13 +1,40 @@
-"""
-Matching module.
+"""Matches a published post to its phone original (duration + pHash); cached originals index."""
 
-This module implements the logic for matching social media videos to their
-high-quality original versions using duration and pHash distances.
-"""
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
+from social2shorts.db import Store
 from social2shorts.models import CatalogEntry, ItemStatus, MatchResult, Original
 from social2shorts.phash import min_distance
+from social2shorts.ports import MediaProbe
+
+log = logging.getLogger(__name__)
+
+
+def index_originals(
+    paths: list[Path], store: Store, media: MediaProbe, n_frames: int
+) -> list[Original]:
+    """Duration + pHashes of each original, computed once per file (cached by path and size).
+
+    An unreadable file (0-byte, partial copy, corrupt) is logged and skipped, so one bad
+    original never blocks matching for every other post.
+    """
+    originals = []
+    for path in paths:
+        try:
+            size = path.stat().st_size
+            cached = store.cached_original(str(path), size)
+            if cached is None:
+                cached = (media.duration(path), media.phashes(path, n_frames))
+                store.cache_original(str(path), size, *cached)
+        except Exception as exc:
+            log.warning("Skipping original %s: cannot read it (%s)", path.name, exc)
+            continue
+        duration, phashes = cached
+        originals.append(Original(path=str(path), duration=duration, phashes=phashes))
+    return originals
 
 
 def match_one(
@@ -17,20 +44,8 @@ def match_one(
     dur_tol: float,
     phash_threshold: int,
 ) -> MatchResult:
-    """
-    Match a single catalog entry against a list of original videos.
-
-    Args:
-        entry (CatalogEntry): The video to match.
-        originals (list[Original]): The list of available original videos.
-        ref_phashes (list[str]): The pHashes of the reference video.
-        dur_tol (float): Duration tolerance in seconds.
-        phash_threshold (int): Maximum Hamming distance for a match.
-
-    Returns:
-        MatchResult: The result of the match, indicating if it's matched,
-            ambiguous, or pending.
-    """
+    """Match one post: exactly one candidate within tolerance -> matched; several -> ambiguous
+    (a human picks, never a risky automatic choice); none -> pending_original."""
     scored = []
     for o in originals:
         if abs(o.duration - entry.duration) > dur_tol:
@@ -38,13 +53,20 @@ def match_one(
         d = min_distance(ref_phashes, o.phashes)
         if d <= phash_threshold:
             scored.append((d, o))
+    scored.sort(key=lambda pair: pair[0])
     if len(scored) == 1:
         d, o = scored[0]
         conf = 1.0 if phash_threshold <= 0 else 1 - d / phash_threshold
-        return MatchResult(source_id=entry.source_id, original_path=o.path,
-                           confidence=conf, status=ItemStatus.matched)
-    if len(scored) >= 2:
-        return MatchResult(source_id=entry.source_id, original_path=None,
-                           confidence=0.0, status=ItemStatus.ambiguous)
-    return MatchResult(source_id=entry.source_id, original_path=None,
-                       confidence=0.0, status=ItemStatus.pending_original)
+        return MatchResult(
+            source_id=entry.source_id, original_path=o.path, confidence=conf,
+            status=ItemStatus.matched,
+        )  # fmt: skip
+    if scored:
+        return MatchResult(
+            source_id=entry.source_id, original_path=None, confidence=0.0,
+            status=ItemStatus.ambiguous, candidates=[o.path for _, o in scored],
+        )  # fmt: skip
+    return MatchResult(
+        source_id=entry.source_id, original_path=None, confidence=0.0,
+        status=ItemStatus.pending_original,
+    )  # fmt: skip

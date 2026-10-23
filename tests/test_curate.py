@@ -1,53 +1,31 @@
-from social2shorts.config import Settings
-from social2shorts.curate import curate, is_eligible, score
-from social2shorts.models import CatalogEntry, Platform
+from fakes import entry
 
-
-def _entry(duration=30.0, view_count=100, like_count=0, comment_count=0, sid="x"):
-    return CatalogEntry(
-        platform=Platform.tiktok, source_id=sid, url="u", caption="", duration=duration,
-        view_count=view_count, like_count=like_count, comment_count=comment_count,
-        upload_date="20260101", track="", artist="",
-    )
-
-
-def _settings(**kw):
-    return Settings(
-        tiktok_profile_url="u", youtube_handle="h", originals_dir="o", work_dir="w", db_path="d", **kw
-    )
+from social2shorts.curate import curate, dedupe, is_eligible, score
+from social2shorts.models import Platform
 
 
 def test_excludes_microclips_and_slideshows():
-    short = _entry(duration=6)
-    ok = _entry(duration=30)
-    slideshow = _entry(duration=0.0)
-    assert is_eligible(short, 12.0) is False
-    assert is_eligible(ok, 12.0) is True
-    assert is_eligible(slideshow, 12.0) is False
+    assert is_eligible(entry("a", 6), 12.0) is False
+    assert is_eligible(entry("a", 30), 12.0) is True
+    assert is_eligible(entry("a", 0.0), 12.0) is False
+    assert is_eligible(entry("a", 0.0), 0.0, exclude_no_duration=False) is True
 
 
-def test_no_duration_flag_off_still_respects_min():
-    assert is_eligible(_entry(duration=0.0), 0.0, exclude_no_duration=False) is True
-    assert is_eligible(_entry(duration=0.0), 0.0, exclude_no_duration=True) is False
-
-
-def test_curate_sorts_by_engagement():
-    a = _entry(duration=30, view_count=100, sid="a")
-    b = _entry(duration=30, view_count=1000, sid="b")
-    out = curate([a, b], _settings(min_duration_s=12))
-    assert out[0].view_count == 1000
-
-
-def test_curate_drops_ineligible():
-    out = curate([_entry(duration=5), _entry(duration=0.0), _entry(duration=30)], _settings())
-    assert len(out) == 1
+def test_curate_sorts_by_engagement_and_drops_ineligible():
+    out = curate([entry("a", 30, view_count=100), entry("b", 30, view_count=1000),
+                  entry("c", 5)], 12.0)  # fmt: skip
+    assert [e.source_id for e in out] == ["b", "a"]
 
 
 def test_score_views_dominate_and_engagement_helps():
-    assert score(_entry(view_count=10000)) > score(_entry(view_count=100))
-    assert score(_entry(view_count=1000, like_count=300)) > score(_entry(view_count=1000, like_count=0))
+    assert score(entry("a", view_count=10000)) > score(entry("a", view_count=100))
+    assert score(entry("a", like_count=300)) > score(entry("a", like_count=0))
+    assert score(entry("a", 30)) > score(entry("a", 120))
 
 
-def test_score_sweet_spot_bonus():
-    assert score(_entry(duration=30)) > score(_entry(duration=120))
-    assert score(_entry(duration=30)) > score(_entry(duration=13))
+def test_dedupe_prefers_platform():
+    tt = entry("tt", 20.1, caption="Road trip!")
+    ig = entry("ig", 20.4, caption="ROAD TRIP!", platform=Platform.instagram, view_count=10**6)
+    assert dedupe([ig, tt], Platform.tiktok) == [tt]
+    assert dedupe([tt, ig], Platform.instagram) == [ig]
+    assert len(dedupe([tt, entry("other", 20, caption="different")], Platform.tiktok)) == 2

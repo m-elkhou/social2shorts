@@ -1,100 +1,79 @@
-# 🎬 social2shorts
+# social2shorts
 
-**Republish the best of TikTok & Instagram as high-quality YouTube Shorts.**
+Turn TikTok/Instagram reels and raw moto footage into monetization-safe YouTube Shorts.
 
-`social2shorts` is a professional-grade pipeline designed to curate high-resolution vertical content from social media profiles, match them with original phone recordings, and automatically enrich and upload them to YouTube.
+[![CI](https://github.com/m-elkhou/social2shorts/actions/workflows/ci.yml/badge.svg)](https://github.com/m-elkhou/social2shorts/actions/workflows/ci.yml)
+[![Docs](https://github.com/m-elkhou/social2shorts/actions/workflows/docs.yml/badge.svg)](https://m-elkhou.github.io/social2shorts/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](#license)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-## 🚀 Features
+```mermaid
+flowchart LR
+    A[TikTok / Instagram posts] --> B[Curate + audio gate<br/>+ match phone original]
+    C[Raw clips in inbox/] --> D[sha256 dedupe]
+    B --> E[Transcribe · metadata · montage]
+    D --> E
+    E --> F[Quota + schedule]
+    F --> G[YouTube upload]
+    G --> H[Ledger + Content-ID guard]
+```
 
-- **Multi-Platform Discovery**: Scrapes TikTok and Instagram profiles for top-performing content.
-- **Original Quality Matching**: Uses Perceptual Hashing (pHash) to link social media posts to 1440x2560 originals on a connected mobile device (MTP).
-- **AI Enrichment**: 
-  - **Faster-Whisper**: Automatic transcription and word-forward captioning.
-  - **Gemini AI**: Generates SEO-optimized YouTube titles, descriptions, and tags.
-- **Pro Transcoding**: FFmpeg pipeline ensuring a perfect 1080x1920 H.264 output with faststart.
-- **Monetization Safety**:
-  - Licensed music detection via audio gate.
-  - Post-upload Content-ID check that flips claimed videos to `private` immediately.
-  - All production uploads start as `unlisted` for human review.
-- **Idempotent Ledger**: Content fingerprinting ensures no video is ever uploaded twice.
+## Features
 
-## 🛠️ Tech Stack
+**Catalog path.** Your best TikTok and Instagram posts, ranked by engagement, deduplicated
+across platforms, re-rendered from the QHD phone original instead of the 540p platform copy.
+Posts with licensed music wait for your approval.
 
-- **Language**: Python 3.12
-- **Environment**: [uv](https://github.com/astral-sh/uv)
-- **AI/ML**: `faster-whisper`, `google-generativeai`
-- **Media**: `ffmpeg`, `PyAV`, `imagehash`
-- **API**: YouTube Data API v3
-- **DB**: SQLite
+**Raw path.** Never-published clips dropped in `inbox/` become 35-second highlights: hook
+first, cuts on engine revs and scene changes, karaoke captions, smart 9:16 reframing, loop
+ending, -14 LUFS audio.
 
-## 📦 Installation
+**Both.** Gemini-written, humanized titles. Per-video style variation. Uploads spread over days
+to fit the YouTube quota, optional scheduled publishing, no duplicates, a Content-ID check after
+upload, a review queue for anything uncertain.
 
-### 1. Prerequisites
-- Python 3.12
-- FFmpeg installed and in your system PATH.
-- A connected Android/iOS device with videos in `Movies/Edits` or `Movies/Instagram`.
+## Quick start
 
-### 2. Setup
+Needs Python 3.12, [uv](https://docs.astral.sh/uv/) and ffmpeg.
+
 ```bash
-# Clone the repository
-git clone https://github.com/m-elkhou/social2shorts.git
-cd social2shorts
-
-# Install dependencies using uv
 uv sync
+cp config.example.toml config.toml            # edit profiles, privacy, language
+uv run social2shorts auth                     # link the YouTube channel once
+uv run social2shorts run --dry-run --limit 3  # renders in work/renders/
+uv run social2shorts run --limit 3            # upload 3, unlisted by default
 ```
 
-### 3. Configuration
-Copy the example config and fill in your details:
+Full documentation, including the Google Cloud OAuth setup and the API audit:
+**<https://m-elkhou.github.io/social2shorts/>**
+
+## Project layout
+
+```text
+src/social2shorts/
+├── cli.py  config.py  models.py  ports.py
+├── pipeline.py        # run loop + shared item processor
+├── operations.py      # review / publish / status
+├── db.py              # SQLite store + migrations
+├── curate.py  match.py  phash.py  media.py  renderer.py
+├── sources/           # yt-dlp catalog, phone (MTP), inbox
+├── ai/                # faster-whisper, Gemini metadata
+├── publish/           # YouTube, Content-ID guard, quota, scheduler
+└── montage/           # probe → analyze → plan → render
+tests/                 # unit (fakes) + integration (ffmpeg)
+docs/                  # MkDocs Material site
+scripts/               # Windows scheduled task
+```
+
+## Development
+
 ```bash
-cp config.example.toml config.toml
-```
-Key settings include:
-- `tiktok_profile_url`: The profile to scrape.
-- `youtube_handle`: Your channel handle.
-- `gemini_model`: Your Gemini API model (e.g., `gemini-1.5-flash`).
-- `phone_name_match`: The name of your phone as seen by Windows.
-
-### 4. Authentication
-Run the auth command to link your YouTube account:
-```bash
-uv run social2shorts auth
+uv run pytest -q -m "not integration"
+uv run ruff check . && uv run ruff format --check .
+uv run --group docs mkdocs serve
 ```
 
-## 📖 Usage
+## License
 
-### Discovery & Curation
-```bash
-# Discover posts from TikTok
-uv run social2shorts discover --limit 100
-
-# Curate the best posts based on engagement
-uv run social2shorts curate
-```
-
-### Ingestion & Matching
-```bash
-# Copy originals from phone to local storage
-uv run social2shorts ingest --limit 20
-
-# Match posts to originals using pHash
-uv run social2shorts match
-```
-
-### The Full Pipeline
-```bash
-# Run the backlog (discover -> curate -> match -> enrich -> upload)
-uv run social2shorts run --limit 5 --privacy unlisted
-```
-
-### Management
-```bash
-# Review audio claims or ambiguous matches
-uv run social2shorts review
-
-# Publish a specific video to public
-uv run social2shorts publish <source_id> --privacy public
-```
-
-## ⚖️ License
 MIT

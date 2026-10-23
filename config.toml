@@ -1,13 +1,46 @@
-tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
+# social2shorts configuration. Any value can be overridden by an environment variable:
+# S2S_<KEY> for top-level keys, S2S_<SECTION>__<KEY> inside sections
+# (e.g. S2S_DB_PATH=..., S2S_YOUTUBE__DAILY_QUOTA_UNITS=5000).
 youtube_handle = "@motoride-mh"
-originals_dir = "originals"
-work_dir = "work"
+originals_dir = "originals"     # local cache of the phone originals
+work_dir = "work"               # references and renders (temporary)
 db_path = "social2shorts.sqlite"
-min_duration_s = 12.0
-duration_tol_s = 1.0
+min_duration_s = 12.0           # skip micro-clips
+duration_tol_s = 1.0            # matching: post vs original duration tolerance
 phash_threshold = 10
 phash_frames = 6
 phone_name_match = "S23"
 phone_video_folders = ["Movies/Edits", "Movies/Instagram"]
-gemini_model = ""
-default_privacy = "unlisted"
+gemini_model = "gemini-2.5-flash"   # needs GEMINI_API_KEY in the environment
+whisper_model = "small"
+
+[sources]
+tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
+instagram_profile_url = ""      # e.g. "https://www.instagram.com/motoride.mh/"
+# instagram_cookies = "cookies.txt"  # exported exported from a logged-in browser
+inbox_dir = "inbox"             # drop raw, never-published videos here
+prefer_platform = "tiktok"      # which copy to keep when a post is on both platforms
+
+[youtube]
+client_secrets = "secrets/client_secret.json"
+token_path = "secrets/token.json"
+category_id = "2"               # Autos & Vehicles
+default_privacy = "unlisted"    # public | unlisted | private | scheduled
+daily_quota_units = 10000
+upload_cost_units = 1600
+max_uploads_per_day = 100       # per-project videos.insert cap (whichever limit hits first)
+made_for_kids = false
+contains_synthetic_media = false  # set true if the montage adds realistic AI-generated content
+# language = "fr"               # fr | en | ar: sets defaultLanguage/defaultAudioLanguage and the
+                                # whisper language. Unset: CTA lines and fallback titles are in
+                                # French (the audience is mostly francophone Morocco).
+
+[schedule]                      # used with --privacy scheduled
+timezone = "Africa/Casablanca"
+publish_slots = ["12:00", "18:00"]
+max_per_day = 2
+min_lead_minutes = 60
+
+[montage]                       # see social2shorts.montage.types.MontageSettings
+target_duration_s = 35
+captions = "karaoke"

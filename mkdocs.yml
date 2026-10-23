@@ -1,0 +1,121 @@
+site_name: social2shorts
+site_description: Turn TikTok/Instagram reels and raw moto footage into monetization-safe YouTube Shorts.
+site_url: https://m-elkhou.github.io/social2shorts/
+repo_url: https://github.com/m-elkhou/social2shorts
+repo_name: m-elkhou/social2shorts
+edit_uri: edit/main/docs/
+copyright: MIT License
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/motorbike
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.instant
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_root_heading: true
+            show_root_full_path: true
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: false
+            members_order: source
+            merge_init_into_class: true
+            filters: ["!^_"]
+            heading_level: 2
+            show_if_no_docstring: false
+            show_bases: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - def_list
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Use cases:
+      - use-cases/index.md
+      - Backlog of best posts: use-cases/catalog-backlog.md
+      - Raw inbox to AI montage: use-cases/raw-inbox.md
+      - Scheduled runs on Windows: use-cases/scheduled-runs.md
+      - Review queue: use-cases/review-queue.md
+      - Publishing and quota: use-cases/publishing.md
+      - Dry run previews: use-cases/dry-run.md
+      - OAuth expiry and alerts: use-cases/alerts.md
+      - Adding a source: use-cases/new-source.md
+  - Concepts:
+      - Architecture: architecture.md
+      - AI montage engine: montage.md
+      - YouTube and monetization safety: youtube-safety.md
+  - Reference:
+      - Configuration: configuration.md
+      - CLI: cli.md
+      - API:
+          - api/index.md
+          - Pipeline and core: api/core.md
+          - Sources: api/sources.md
+          - AI: api/ai.md
+          - Publishing: api/publish.md
+          - Montage engine: api/montage.md
+  - Development:
+      - Contributing: development.md
+      - Roadmap: roadmap.md
+  - Research:
+      - State of the art: research/state-of-the-art.md
+      - Original design (FR): research/original-design-fr.md
