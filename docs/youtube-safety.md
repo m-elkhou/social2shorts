@@ -26,15 +26,22 @@ the second line.
 
 ## No duplicates
 
-- Catalog: the fingerprint is a hash of the normalized caption and the rounded duration, so the
-  TikTok and Instagram copies of one reel are one item.
-- Raw: the fingerprint is the file's sha256.
-- The ledger row is written right after YouTube returns, before anything else can fail. Every
-  item is checked against the ledger before rendering. A rerun never uploads the same content
-  twice.
+- **The real key is the source file.** Every upload records the sha256 of the file it was
+  rendered from (the phone original or the inbox clip). Before transcribing or rendering, the
+  pipeline checks the item key and that hash against the ledger. One file never becomes two
+  Shorts, whichever post or inbox path it came from.
+- **Cross-platform hint.** Catalog posts with the same normalized caption and rounded duration
+  on TikTok and Instagram are collapsed early, keeping the `prefer_platform` copy, to save
+  work. Same-platform posts and emoji-only captions are never merged.
+- **Write-ahead.** The item is marked `uploading` before the API call and the ledger row is
+  written right after YouTube returns. If the process dies during the call, the next run sends
+  the item to review as `interrupted` instead of uploading it again.
+- **One run at a time.** A lock file in `work_dir` stops a manual run from overlapping a
+  scheduled one.
 
-**Limits.** Two catalog posts with the same caption and duration are treated as one. A
-re-encoded copy of a raw file has a new sha256 and counts as new content.
+**Limits.** A re-encoded or trimmed copy of a file has a new sha256 and counts as new content.
+Databases from before schema v3 have no content hash; for those rows the caption fingerprint is
+used.
 
 ## Content-ID guard
 
@@ -47,10 +54,12 @@ does expose:
 | `uploadStatus = rejected` | `rejected: <rejectionReason>` |
 | `uploadStatus = failed` | `failed: <failureReason>` |
 | `regionRestriction.blocked` not empty (the usual effect of a music claim) | `blocked in N countries` |
+| `regionRestriction.allowed` present (even empty): viewable only in listed countries | `only viewable in N countries` |
 | `licensedContent = true` | `claimed as licensed content` |
 | The video is gone | `removed by YouTube` |
 
 A flagged video is made private, its item becomes `claimed`, and a `claim` review is queued.
+`publish` leaves claimed videos alone unless you pass `--include-claimed`.
 The check runs right after each upload and again at the start of every real run for uploads of
 the last 3 days that are public, unlisted or scheduled, because claims show up minutes to
 hours later. It costs 1 unit per 50 videos.
@@ -76,8 +85,11 @@ with little to no variation across videos", channel-wide. Mitigations in the cod
   Capitalized ones and collapses repeated punctuation.
 - **Cleaning**: @handles, hashtags in the text, and TikTok/Instagram/Reels mentions are
   stripped. Spam tags (`fyp`, `foryou`, `viral`, `pourtoi`...) are dropped.
-- **Varied endings**: a call-to-action line is picked per item from a list (some items get
-  none). Without Gemini, fallback titles are picked per item too.
+- **Varied endings**: a call-to-action line is picked per item from a list in French, English
+  or Arabic (some items get none). Without Gemini, fallback titles are composed per item from
+  word pools: time of day and date from the file name or post date, a keyword from the
+  transcript.
+- **Valid characters**: `<` and `>` are removed (YouTube rejects them in titles).
 - **Limits**: title ≤ 100 characters, hook ≤ 40, 15 tags and ≤ 450 tag characters.
   `#Shorts` is appended to the description.
 

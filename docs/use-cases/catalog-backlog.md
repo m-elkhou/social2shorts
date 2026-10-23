@@ -21,7 +21,7 @@ uv run social2shorts run --source catalog --limit 3
 ```mermaid
 flowchart TD
     D[discover<br/>yt-dlp lists the profile] --> C[curate]
-    C -->|dedupe| C1[Same caption + rounded duration<br/>on both platforms = one item,<br/>prefer_platform copy kept]
+    C -->|soft dedupe| C1[Same caption + rounded duration<br/>on the other platform:<br/>keep the prefer_platform copy]
     C1 --> C2[Drop posts under min_duration_s<br/>and photo slideshows]
     C2 --> C3[Sort by score]
     C3 --> A{track is 'original sound'<br/>or empty?}
@@ -58,6 +58,14 @@ landscape still matches its upright social copy.
 
 Exactly one candidate is required. Several candidates (a series filmed the same night) go to
 review: the tool never guesses.
+
+### Duplicates
+
+The caption + duration comparison is only a hint to save work. Posts on the same platform, and
+posts whose caption has no words (emoji only), are never merged. The real guard runs just
+before rendering: if the sha256 of the matched original file is already in the upload ledger,
+the post is marked `duplicate`. One original never becomes two Shorts, even if two posts
+matched it.
 
 ### Polish mode
 

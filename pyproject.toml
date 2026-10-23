@@ -12,6 +12,7 @@ dependencies = [
     "google-genai>=2.33.0",
     "imagehash>=4.3.2",
     "pillow>=13.0.0",
+    "numpy>=2.0",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
     "pywin32>=312; sys_platform == 'win32'",

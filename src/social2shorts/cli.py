@@ -154,7 +154,7 @@ def run(
     ),
     limit: Annotated[int, typer.Option(help="Max uploads (renders with --dry-run).")] = 3,
     privacy: Annotated[
-        Privacy | None, typer.Option(help="Default: [youtube] default_privacy.")
+        Privacy | None, typer.Option(help="Default: youtube.default_privacy from the config.")
     ] = None,
     continuous: Annotated[
         bool, typer.Option(help="Unattended: no --limit, upload until today's quota is spent.")

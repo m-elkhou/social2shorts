@@ -91,7 +91,7 @@ inbox_dir = "inbox"                 # raw clips go here
 
 [youtube]
 default_privacy = "unlisted"        # start here, review, then publish
-# language = "fr"                   # metadata language + whisper language
+# language = "fr"                   # fr | en | ar: metadata + whisper language
 ```
 
 Every key, with defaults, is in the [configuration reference](configuration.md). Any key can
@@ -166,14 +166,15 @@ Titles, descriptions, tags and the on-screen hook line are written by Gemini.
 `GOOGLE_API_KEY` works too. The model is `gemini_model` (default `gemini-2.5-flash`). Only
 your own public caption and the transcript are sent.
 
-Without a key the run logs a warning and falls back to captions or a varied rider title. No
-hook card is drawn in that case, because the hook line comes from the LLM.
+Without a key the run logs a warning and falls back to the caption, or to a title composed
+per video from word pools (time of day from the file name or post date, keywords from the
+transcript). No hook card is drawn in that case, because the hook line comes from the LLM.
 
 ## 5. First dry run
 
 ```bash
 mkdir -p inbox
-cp /path/to/a/raw/clip.mp4 inbox/
+cp /path/to/a/raw/clip.mp4 inbox/      # at least 12 s long
 uv run social2shorts run --source raw --dry-run --limit 1
 ```
 

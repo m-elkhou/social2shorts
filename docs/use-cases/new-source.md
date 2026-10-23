@@ -70,7 +70,6 @@ add a `SourceKind` and a strategy:
 ```python
 class GoProStrategy:
     kind = SourceKind.gopro            # new member in models.SourceKind
-    montage_mode = MontageMode.highlight
 
     def refresh(self, run: Run) -> None:
         """Register new files as items (store.upsert_raw works for file-based input)."""
@@ -78,19 +77,18 @@ class GoProStrategy:
     def candidates(self, run: Run) -> list[Item]:
         """Items to try this run, approved ones first."""
 
-    def prepare(self, run: Run, item: Item) -> Path | None:
-        """The file to render, or None after routing the item to review/pending."""
+    def prepare(self, run: Run, item: Item) -> Source | None:
+        """Source(path, MontageMode.highlight), or None after routing to review/pending."""
 ```
 
 Register it in `STRATEGIES` and add the value to `SourceChoice` so `run --source gopro`
-works. `process_item` handles dedupe, transcription, metadata, rendering, upload, ledger and
-guard for every kind.
+works. `process_item` handles dedupe (item key and source-file sha256), transcription,
+metadata, rendering, upload, ledger and guard for every kind.
 
 ## Checklist
 
 - [ ] The adapter satisfies the port's method signatures (structural typing: no base class).
 - [ ] A fake in `tests/fakes.py` and tests that run without network or ffmpeg.
-- [ ] A stable `key` and a `fingerprint` that is the same for the same content, so the ledger
-      blocks re-uploads.
+- [ ] A stable `key`. Re-uploads of the same file are blocked by its sha256 in any case.
 - [ ] New config keys documented in [Configuration](../configuration.md).
 - [ ] Any schema change goes through a new function appended to `db.MIGRATIONS`.

@@ -34,7 +34,7 @@ Older flat config files are upgraded on load: top-level `tiktok_profile_url`,
 | `originals_dir` | str | `originals` | Local cache of phone originals. |
 | `work_dir` | str | `work` | References (`work/refs`) and renders (`work/renders`). Renders are deleted after upload. |
 | `db_path` | str | `social2shorts.sqlite` | SQLite database. |
-| `min_duration_s` | float | `12.0` | Catalog posts shorter than this are skipped (micro-clips). Posts without a duration (slideshows) are always skipped. |
+| `min_duration_s` | float | `12.0` | Catalog posts shorter than this are skipped (micro-clips); posts without a duration (slideshows) are always skipped. Raw clips shorter than this go to review as `short`. |
 | `duration_tol_s` | float | `1.0` | Matching: max difference between post and original durations. |
 | `phash_threshold` | int | `10` | Matching: max Hamming distance between frame pHashes (64-bit). |
 | `phash_frames` | int | `6` | Frames sampled per video for pHashes. |
@@ -66,7 +66,7 @@ Older flat config files are upgraded on load: top-level `tiktok_profile_url`,
 | `max_uploads_per_day` | int > 0 | `100` | Cap on `videos.insert` calls per day. |
 | `made_for_kids` | bool | `false` | `status.selfDeclaredMadeForKids` on every upload and privacy change. |
 | `contains_synthetic_media` | bool | `false` | `status.containsSyntheticMedia`. Set `true` if renders add realistic AI-generated content. |
-| `language` | str \| null | `null` | e.g. `fr`: sets `defaultLanguage` and `defaultAudioLanguage`, the metadata language and the Whisper language. Unset: Whisper auto-detects and metadata follows the caption. |
+| `language` | `fr` \| `en` \| `ar` \| null | `null` | Sets `defaultLanguage` and `defaultAudioLanguage`, the language Gemini writes in, the call-to-action lines and fallback titles, and the Whisper language. Unset: Whisper auto-detects, Gemini follows the caption or transcript (French if there is none), and CTA lines and fallback titles are in French. |
 
 ## `[schedule]`
 

@@ -145,6 +145,7 @@ def test_cleanup_error_after_upload_is_harmless(settings, deps, monkeypatch):
 
 
 # 4. Rotation-aware pHash --------------------------------------------------------------
+@pytest.mark.integration
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg missing")
 def test_portrait_original_stored_rotated_matches_upright_copy(tmp_path):
     def ff(*args):

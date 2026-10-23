@@ -15,14 +15,16 @@ uv run social2shorts review
  raw-0f3a9c1d2b4e5f60 error      gave up after 3 attempts: MontageError: ...    2026-10-23 10:02:13
 ```
 
-## The four kinds
+## The six kinds
 
 | Kind | Why it's here | What to do |
 |---|---|---|
 | `audio` | The catalog post uses a licensed track (yt-dlp `track` is not "original sound"). | If you own the rights or it is royalty-free: `review --approve KEY`. Otherwise `review --reject KEY`. |
 | `ambiguous` | Several phone originals match the post. | Pick one: `review --approve KEY --original PATH`. The candidate paths are printed if you omit `--original`. |
 | `error` | Processing failed 3 times. | Fix the cause (file moved, ffmpeg error...), then `review --approve KEY` for a fresh retry budget. |
-| `claim` | The Content-ID guard made an uploaded video private. | Check YouTube Studio. If it's fine: `publish KEY`. If not: `review --reject KEY`. |
+| `short` | A raw clip is shorter than `min_duration_s` (12 s). | Render it anyway: `review --approve KEY`. Or `review --reject KEY`. |
+| `interrupted` | A previous run died while uploading this video. It may or may not be on YouTube. | Look in YouTube Studio. If it is there: `review --reject KEY`. If not: `review --approve KEY`. |
+| `claim` | The Content-ID guard made an uploaded video private. | Check YouTube Studio. If it's fine: `publish KEY --privacy public --include-claimed`. If not: `review --reject KEY`. |
 
 ```mermaid
 flowchart LR
@@ -30,7 +32,7 @@ flowchart LR
     A -- "review --approve KEY" --> R[ready<br/>processed first next run]
     A -- "review --approve KEY --original PATH" --> R
     A -- "review --reject KEY" --> X[rejected<br/>never processed again]
-    A -- "publish KEY<br/>(claims only)" --> U[uploaded]
+    A -- "publish KEY --include-claimed<br/>(claims only)" --> U[uploaded]
 ```
 
 ## Commands
@@ -54,7 +56,7 @@ Approving an item:
 - sets its status to `ready` and resets its attempt counter,
 - removes it from the queue,
 - and makes it the first candidate of the next run (approved catalog items skip the music
-  gate).
+  gate, approved raw clips skip the length check).
 
 Approving an item that is already on YouTube only clears the review row and reminds you to use
 `publish` to change its visibility.
@@ -64,3 +66,7 @@ Approving an item that is already on YouTube only clears the review row and remi
 A failure does not go to the queue at once. The item is counted, marked `failed` and retried on
 the next runs. On the third failure (`MAX_ATTEMPTS = 3`) it is queued as `error`. The run
 report shows retries under *failed (will retry)*.
+
+When 3 videos in a row fail with the *same* error, the run assumes the problem is the system
+(network down, ffmpeg missing, model download failed), not the videos. It stops, records an
+alert, and charges no attempt to any of them. Fix the cause and run again.

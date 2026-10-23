@@ -88,7 +88,9 @@ def discover_profile(
     return entries
 
 
-def download_reference(url: str, dest_dir: Path, ytdlp: Ytdlp = run_ytdlp) -> Path:
+def download_reference(
+    url: str, dest_dir: Path, ytdlp: Ytdlp = run_ytdlp, cookies: str | None = None
+) -> Path:
     """Download the watermark-free ~540p version of a post (only used for pHash matching).
 
     Raises:
@@ -99,6 +101,8 @@ def download_reference(url: str, dest_dir: Path, ytdlp: Ytdlp = run_ytdlp) -> Pa
         "format": "h264_540p*/bytevc1_540p*/best",
         "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
     }
+    if cookies:
+        opts["cookiefile"] = cookies
     infos = ytdlp(url, opts, download=True)
     if not infos:
         raise DiscoveryError(f"download failed for {url}")
@@ -138,4 +142,5 @@ class SocialCatalog:
 
     def download_reference(self, url: str, dest_dir: Path) -> Path:
         """See :func:`download_reference`."""
-        return download_reference(url, dest_dir, self.ytdlp)
+        cookies = self.cookies if "instagram.com" in url else None
+        return download_reference(url, dest_dir, self.ytdlp, cookies)

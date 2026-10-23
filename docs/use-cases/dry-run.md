@@ -27,6 +27,7 @@ Rendered raw-0f3a9c1d2b4e5f60 -> work/renders/raw-0f3a9c1d2b4e5f60.mp4 ('Took th
 ## Things to know
 
 - **No quota check, no guard sweep.** A dry run never reads or spends quota.
+- **Same lock.** A dry run cannot start while a real run is working, and the other way round.
 - **Items move to `rendered`.** A second dry run skips them. The next real run processes them
   again from scratch (and re-renders), so changing `[montage]` between the dry run and the
   real run is safe.

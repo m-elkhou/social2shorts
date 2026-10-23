@@ -42,7 +42,8 @@ cmd /c "uv" run social2shorts run --continuous --source all --privacy scheduled 
 - `--continuous` removes the `--limit` cap: the run uploads until the quota is spent.
 - First trigger is 5 minutes after midnight of the registration day, then every
   `-EveryHours`. `StartWhenAvailable` catches up on missed runs.
-- `MultipleInstances IgnoreNew`: a run never overlaps the previous one.
+- `MultipleInstances IgnoreNew`: a run never overlaps the previous one. The pipeline's own
+  lock file also stops a manual run from overlapping the scheduled one.
 - A run is stopped after 3 hours.
 - Output, including alerts, goes to `logs\social2shorts.log`.
 

@@ -8,19 +8,26 @@ uploads, then make them public:
 ```bash
 uv run social2shorts run --limit 3                    # unlisted
 uv run social2shorts status                           # list what was uploaded
-uv run social2shorts publish 7667654234271255828      # one video -> public
-uv run social2shorts publish all --privacy public     # every recorded upload
+uv run social2shorts publish 7667654234271255828 --privacy public
+uv run social2shorts publish all --privacy public
 uv run social2shorts publish raw-0f3a9c1d2b4e5f60 --privacy private
 ```
 
-`publish` accepts `public`, `unlisted` or `private`. Each change is a `videos.update` call
-costing 50 units. When the day's quota runs out, the remaining items are reported as failed
-with "daily quota spent, retry tomorrow". The command exits with code 1 if anything failed.
+`--privacy` is required: `public`, `unlisted` or `private`. Each change is a `videos.update`
+call costing 50 units. When the day's quota runs out, the remaining items are reported as
+failed with "daily quota spent, retry tomorrow". The command exits with code 1 if anything
+failed.
 
-!!! danger "`publish all` touches every upload"
-    `publish all` changes *every* video in the ledger. That includes videos the Content-ID
-    guard made private, and scheduled videos: their `publishAt` is cleared and they go public
-    right away. Publish by item key when you have claims or a calendar.
+Two kinds of uploads are left unchanged unless you ask, and listed as *left unchanged*:
+
+| Upload | Why it is skipped | Include it with |
+|---|---|---|
+| Made private by the Content-ID guard (`claimed`) | You should check Studio first | `--include-claimed` |
+| Scheduled, `publishAt` still in the future | Changing it clears `publishAt` and breaks the calendar | `--include-scheduled` |
+
+```bash
+uv run social2shorts publish 7667654234271255828 --privacy public --include-claimed
+```
 
 ## Scheduled publication
 

@@ -11,11 +11,13 @@ Based on the code as it is today and on the recommendations in
 - [x] Engagement score, duration filters, cross-platform dedupe (`prefer_platform`)
 - [x] Licensed-music gate on yt-dlp `track` metadata
 - [x] Phone originals over Windows MTP (COM `Shell.Application`), local cache, offline fallback
-- [x] Duration + pHash matching, ambiguous matches sent to a human, cached fingerprints
+- [x] Duration + pHash matching (rotation-aware), ambiguous matches sent to a human, cached fingerprints
 
 **Raw path and montage**
 
-- [x] Inbox scanner with sha256 dedupe (hash cached by path, size, mtime)
+- [x] Inbox scanner with sha256 dedupe (hash cached by path, size, mtime), skips files still copying
+- [x] Short clips kept whole, clips under `min_duration_s` sent to review
+- [x] HDR (HLG/PQ) phone footage tonemapped to SDR BT.709
 - [x] Signal analysis: motion, loudness, speech, scene cuts, subject position, engine revs
 - [x] Highlight planner: hook first (rev-led when possible), energy-based rhythm, snapping to
       revs / cuts / onsets, words never split, speed ramps, loop ending with crossfade
@@ -28,7 +30,11 @@ Based on the code as it is today and on the recommendations in
 
 - [x] One item processor for both paths; `run --source catalog|raw|all`, `--dry-run`, `--continuous`
 - [x] faster-whisper word timings, Gemini metadata (google-genai), `humanize()`, fallback titles
-- [x] Resumable upload with retries and backoff; ledger written right after upload
+- [x] Resumable upload with retries and backoff; `uploading` status and ledger written right after upload
+- [x] Upload dedupe by source-file sha256; interrupted uploads sent to a human
+- [x] Single-instance run lock; systemic-failure circuit breaker
+- [x] `publish` leaves claimed and scheduled videos alone unless included explicitly
+- [x] French, English and Arabic CTA lines; composed fallback titles
 - [x] Quota budget per Pacific day (units and insert calls); scheduled `publishAt` slots
 - [x] Content-ID guard after upload and on a 3-day sweep
 - [x] Review queue with approve / approve with original / reject, retry budget
@@ -80,18 +86,16 @@ Based on the code as it is today and on the recommendations in
 - Content ID claims are not exposed by the public Data API. The guard uses rejection, region
   blocking, `licensedContent` and removal.
 - MTP phone ingestion is Windows-only.
-- Cross-platform dedupe relies on caption and rounded duration.
+- The cross-platform caption hint can miss a pair; the source-file hash still blocks the
+  second upload when both posts match the same original.
 - Processing is sequential by design: the YouTube quota is the bottleneck.
 
 ## Known issues
 
 Found while writing these docs. Not fixed yet.
 
-- `publish all` also changes videos the Content-ID guard made private, and clears `publishAt`
-  on scheduled videos, publishing them at once.
-- `download_reference` does not pass `instagram_cookies`, so reference downloads for Instagram
-  posts may fail where discovery works.
-- The `run --privacy` help text loses `[youtube]` (rich markup) and shows "Default:  default_privacy".
-- `numpy` is imported by the montage engine but is not a direct dependency in
-  `pyproject.toml` (it comes in through other packages).
 - The `matched` item status is never set; match results live in the `matches` table.
+- `language = "ar"` has Arabic CTA lines but no Arabic fallback-title pool: titles without
+  Gemini come out in French.
+- Every alert, including the systemic-failure and "uploaded but not recorded" alerts, is only
+  cleared by `auth`.

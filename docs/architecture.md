@@ -14,12 +14,13 @@ lives in one SQLite file.
 | `models.py` | Domain models and enums: `Item`, `ItemStatus`, `CatalogEntry`, `ShortMeta`, `Upload`... |
 | `ports.py` | `typing.Protocol` interfaces the core needs. |
 | `pipeline.py` | The run loop, the two source strategies and the shared `process_item`. |
+| `lock.py` | Single-instance lock (a PID file in `work_dir`) so two runs never overlap. |
 | `operations.py` | Operator actions: approve, reject, publish, status summary. |
 | `db.py` | `Store`, the SQLite repository, with versioned migrations. |
 | `curate.py` | Eligibility filters, engagement score, cross-platform dedupe. |
 | `match.py` | Matches a post to its phone original (duration + pHash), caches originals. |
 | `phash.py` | Perceptual hashes of sampled frames (PyAV + imagehash), Hamming distance. |
-| `media.py` | `LocalMedia` adapter: ffprobe duration and pHashes. |
+| `media.py` | `LocalMedia` adapter (ffprobe duration, pHashes) and the cached sha256 of source files. |
 | `renderer.py` | `MontageRenderer` adapter: calls the montage engine lazily. |
 | `sources/tiktok_instagram.py` | `SocialCatalog` adapter: yt-dlp discovery and 540p reference download. |
 | `sources/phone.py` | `PhoneOriginals` adapter and `MtpPhoneSource` (Windows COM). |
@@ -103,10 +104,13 @@ from the fakes in `tests/fakes.py`. When `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) 
 Inside the core, a `SourceStrategy` per `SourceKind` decides how items are found and
 prepared:
 
-| Strategy | Kind | Montage mode | refresh | candidates | prepare |
-|---|---|---|---|---|---|
-| `CatalogStrategy` | `catalog` | `polish` | yt-dlp discovery | approved first, then the curated shortlist | audio gate, reference pHashes, match to an original |
-| `RawStrategy` | `raw` | `highlight` | inbox scan | approved first, then inbox order | the inbox file itself |
+| Strategy | Kind | refresh | candidates | prepare returns |
+|---|---|---|---|---|
+| `CatalogStrategy` | `catalog` | yt-dlp discovery | approved first, then the curated shortlist | the matched phone original, mode `polish` (after the audio gate and matching) |
+| `RawStrategy` | `raw` | inbox scan | approved first, then inbox order | the inbox file: mode `highlight` if longer than `[montage] target_duration_s`, else `polish`. Clips under `min_duration_s` go to review. |
+
+`prepare` returns a `Source(path, mode)`, or `None` after routing the item to review or
+`pending_original`.
 
 ## Item lifecycle
 
@@ -121,24 +125,29 @@ stateDiagram-v2
     discovered --> review_audio: licensed music
     discovered --> ambiguous: several originals match
     pending_original --> ambiguous: several originals match
-    discovered --> duplicate: fingerprint already uploaded
+    discovered --> too_short: raw clip under min_duration_s
+    discovered --> duplicate: item or source file already uploaded
     discovered --> rendered: dry run
-    discovered --> uploaded: upload OK
-    pending_original --> uploaded: original found, upload OK
-    rendered --> uploaded: next real run
+    rendered --> uploading: next real run
+    discovered --> uploading: upload call starts
+    pending_original --> uploading: original found
+    uploading --> uploaded: YouTube accepted it
+    uploading --> failed: run crashed mid-upload, queued as interrupted
     discovered --> failed: error, attempt counted
-    failed --> uploaded: retry OK
+    failed --> uploading: retry, fewer than 3 attempts
     failed --> failed: third failure, queued for review
     review_audio --> ready: review approve
     ambiguous --> ready: review approve with original
+    too_short --> ready: review approve
     failed --> ready: review approve
-    ready --> uploaded: processed first
+    ready --> uploading: processed first
     ready --> failed: third failure
     review_audio --> rejected: review reject
     ambiguous --> rejected: review reject
+    too_short --> rejected: review reject
     failed --> rejected: review reject
     uploaded --> claimed: Content-ID guard
-    claimed --> uploaded: publish public or unlisted
+    claimed --> uploaded: publish with include-claimed
     claimed --> rejected: review reject
     duplicate --> [*]
     rejected --> [*]
@@ -148,6 +157,10 @@ Rules behind the diagram (`pipeline._eligible`):
 
 - A run picks up items in `discovered`, `pending_original`, `matched`, `ready`, `failed` with
   fewer than 3 attempts, and `rendered` (real runs only).
+- `uploading` is set just before the `videos.insert` call. If the call fails it goes back to
+  the previous status. If the process dies during the call, the next run finds it still
+  `uploading`, marks it `failed` with no retries left and queues an `interrupted` review: the
+  video may or may not be on YouTube, so a human checks Studio.
 - `matched` exists in the enum and is accepted as open, but the pipeline stores match results
   in the `matches` table and never sets it on an item.
 - An error on a `ready` item keeps it `ready` until the third failure.
@@ -167,30 +180,34 @@ sequenceDiagram
     participant R as Renderer
     participant Q as QuotaBudget
     participant YT as VideoPlatform
-    P->>DB: is_uploaded(fingerprint)?
+    P->>DB: item already uploaded? (key, raw sha256, legacy fingerprint)
     alt already uploaded
         DB-->>P: yes, mark duplicate, skip
     end
     P->>S: prepare(item)
-    alt licensed, ambiguous or no original
+    alt licensed, ambiguous, too short or no original
         S->>DB: status + review row (or pending_original)
         S-->>P: None, stop here
     end
-    S-->>P: source file
-    P->>T: transcribe(source)
+    S-->>P: Source(path, mode)
+    P->>DB: sha256 of the source file uploaded already?
+    alt same file already on YouTube
+        DB-->>P: yes, mark duplicate, skip
+    end
+    P->>T: transcribe(path)
     T-->>P: words with timings
     P->>L: complete_json(prompt)
     L-->>P: title, description, tags, hook
-    P->>R: render(source, words, montage settings, hook)
+    P->>R: render(path, words, settings with mode, hook)
     R-->>P: work/renders/key.mp4
     alt dry run
         P->>DB: status rendered
     else real run
+        P->>DB: status uploading
         P->>YT: upload(video, meta, privacy, publish_at)
         YT-->>P: video id, applied privacy
-        P->>DB: record_upload (ledger, right away)
+        P->>DB: record_upload (ledger, right away), status uploaded
         P->>Q: spend(upload_cost_units)
-        P->>DB: status uploaded
         P->>YT: check_claims([id])
         opt flagged
             P->>YT: set_privacy(private)
@@ -199,20 +216,31 @@ sequenceDiagram
     end
 ```
 
-Before the loop, a real run re-checks uploads from the last 3 days that are not private (or
-are scheduled). Claims can appear hours after upload.
+Before the loop, a run takes the lock, recovers items left `uploading` by a crashed run, and
+(real runs only) re-checks uploads from the last 3 days that are not private or are scheduled.
+Claims can appear hours after upload.
 
 Errors:
 
 - `AuthRefreshError` stops the run and records an alert (exit code 2).
 - `QuotaExceededError` and `ScheduleFull` stop the run with a reason.
-- Anything else counts a failed attempt for that item and the loop continues.
-- A failed upload still spends `upload_cost_units`: YouTube may have charged it.
+- Anything else is an item failure, with one exception: if **3 items in a row fail with the
+  same error** (`SYSTEMIC_FAILURES`), it is treated as a system fault (no network, a model
+  download failed...). The run stops, records an alert, and no item is charged an attempt.
+  Otherwise each failure counts one attempt for its item and the loop continues.
+- A failed upload call still spends `upload_cost_units`: YouTube may have charged it.
+- Once YouTube accepted a video, nothing is retried. If the ledger write itself fails, the run
+  logs a critical message and records an alert with the video link.
+- A second run started while one holds `work_dir/social2shorts.lock` does nothing and reports
+  "another run (pid N) has been working for M min". A lock older than 6 hours is treated as
+  stale and replaced.
 
 ## Database
 
 One SQLite file (`db_path`). The schema version is `PRAGMA user_version`; `Store.init_schema()`
-applies the pending functions of `db.MIGRATIONS`, one transaction each. Version 2 is current.
+applies the pending functions of `db.MIGRATIONS`, one transaction each. Version 3 is current:
+it added `uploads.content_sha256` (the real dedupe key), stored timestamps as ISO UTC, and
+mapped legacy Content-ID reviews to claims.
 There are no declared foreign keys; the relations below are logical.
 
 ```mermaid
@@ -257,7 +285,8 @@ erDiagram
     UPLOADS {
         TEXT youtube_id PK
         TEXT item_key
-        TEXT fingerprint UK
+        TEXT fingerprint "caption hint or raw sha256"
+        TEXT content_sha256 "source file sha256"
         TEXT privacy
         TEXT publish_at
         TEXT uploaded_at
@@ -304,9 +333,9 @@ erDiagram
 | `catalog` | Post metadata from yt-dlp, joined to `items` on `key = source_id`. |
 | `matches` | Last match result per post, with candidate paths for ambiguous ones. |
 | `review_queue` | One row per item waiting for a decision (latest reason wins). |
-| `uploads` | The anti-duplicate ledger. `fingerprint` is unique. |
+| `uploads` | The anti-duplicate ledger. Checked by item key, by source-file sha256, and by caption fingerprint for pre-v3 rows. |
 | `quota_usage` | Units and `videos.insert` calls per Pacific day. |
-| `originals`, `ref_phashes`, `file_hashes` | Caches: original fingerprints, reference pHashes, inbox sha256. |
+| `originals`, `ref_phashes`, `file_hashes` | Caches: original fingerprints, reference pHashes, sha256 of source files (by path, size and mtime). |
 | `alerts` | Operator alerts shown by `status` until `auth` resolves them. |
 
 To change the schema, append a new `_migrate_vN(conn)` function to `MIGRATIONS`. Never edit
@@ -320,7 +349,9 @@ an existing one.
 | Strategy | `CatalogStrategy`, `RawStrategy`, `STRATEGIES` | Both paths share one processor; only "find and prepare" differs. |
 | Repository | `db.Store` | All SQL in one place, one short-lived connection per operation. |
 | Dependency injection | `PipelineDeps` with a `default()` factory, injectable `clock` and `sleep` | Deterministic tests for time, retries and quota days. |
-| Write-ahead ledger | `_upload` records the upload before anything else | A crash after upload never causes a second upload. |
+| Write-ahead ledger | `uploading` status before the call, ledger row right after it | A crash after upload never causes a second upload; a crash during it goes to a human. |
+| Single-instance lock | `lock.single_instance` | A manual run and a scheduled run never upload at the same time. |
+| Circuit breaker | `FailureStreak` | A system-wide fault stops the run instead of burning every item's retries. |
 | Versioned migrations | `db.MIGRATIONS` + `PRAGMA user_version` | Old databases upgrade in place, atomically per step. |
 | Retry with backoff and jitter | `publish.youtube.run_resumable` | Survives 5xx and dropped connections during long uploads. |
 | Graceful fallback | `generate_metadata` | A Gemini outage never blocks an upload. |

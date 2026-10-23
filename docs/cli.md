@@ -16,7 +16,7 @@ Every command takes `-c`, `--config PATH` (default `config.toml`).
 
 | Code | Meaning |
 |---|---|
-| 0 | Done (also when a run stops early on quota or a full schedule). |
+| 0 | Done (also when a run stops early on quota, a full schedule, a systemic failure or another run holding the lock). |
 | 1 | Config missing or invalid, unknown item, bad `--original` path, nothing found, or a `publish` change failed. |
 | 2 | YouTube authorization failed (`run` records an alert; `publish` asks you to run `auth`). |
 
@@ -87,6 +87,9 @@ uv run social2shorts run --source raw --privacy scheduled --continuous
 Prints a report with these buckets: uploaded, rendered, needs review, waiting for original,
 already uploaded, failed (will retry), made private (claim). Exits 2 on an auth alert.
 
+Only one run works at a time (lock file `work_dir/social2shorts.lock`). A second run stops at
+once with "another run (pid N) has been working for M min; this run did nothing".
+
 ## `review`
 
 List items waiting for a decision, or approve/reject one.
@@ -112,11 +115,18 @@ Change the visibility of uploaded video(s), e.g. unlisted → public after revie
 | Argument / option | Default | Description |
 |---|---|---|
 | `TARGET` | required | An item key, or `all` for every recorded upload. |
-| `--privacy public\|unlisted\|private` | `public` | `scheduled` is refused: scheduling happens at upload time. |
+| `--privacy public\|unlisted\|private` | required | `scheduled` is refused: scheduling happens at upload time. |
+| `--include-claimed` / `--no-include-claimed` | off | Also change videos the Content-ID guard made private. |
+| `--include-scheduled` / `--no-include-scheduled` | off | Also change videos still waiting for their publish time (clears their `publishAt`). |
+
+```bash
+uv run social2shorts publish all --privacy public
+uv run social2shorts publish raw-0f3a9c1d2b4e5f60 --privacy public --include-claimed
+```
 
 Each change costs 50 quota units. Changing to public or unlisted marks the item `uploaded`
-and clears its review row (this is how you release a claimed video). The `publishAt` of a
-scheduled video is cleared. Exits 1 if any change failed.
+and clears its review row (this is how you release a claimed video). Skipped uploads are
+listed as "left unchanged" with the reason. Exits 1 if any change failed.
 
 ## `status`
 

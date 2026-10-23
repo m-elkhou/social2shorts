@@ -45,7 +45,11 @@ sequenceDiagram
   an exact copy is skipped.
 - **Copies in progress.** A file modified in the last 60 s is skipped for this run (it may
   still be copying). An unreadable file (locked by another program) is skipped with a warning.
-- **Highlight mode.** The engine scores every 0.2 s of the clip (motion, loudness, speech,
+- **Too short.** A clip under `min_duration_s` (12 s) waits in the review queue as `short`.
+  `review --approve KEY` renders it anyway.
+- **Short clips are kept whole.** A clip no longer than `[montage] target_duration_s` is
+  polished (reframe, captions, loudness) without re-cutting.
+- **Highlight mode.** For longer clips, the engine scores every 0.2 s of the clip (motion, loudness, speech,
   engine revs), pulls the best 2 s to the front as a hook, fills about 35 s with the best
   segments in chronological order, and ends on an energy peak that crossfades back into the
   first frame. Details: [AI montage engine](../montage.md).

@@ -39,10 +39,12 @@ Any failure raises `MontageError` with the tail of ffmpeg's stderr.
 
 | Mode | Used for | What the planner does |
 |---|---|---|
-| `polish` | Catalog posts (already edited) | Keeps the whole clip. Trims a dead head or tail (static, silent, no speech) of 0.5 s or more. Caps at 180 s. No hook cut, no punch-in, no loop. |
-| `highlight` | Raw inbox footage | Picks the best moments, hook first, re-cuts to `target_duration_s`, punch-ins, loop ending. A clip already no longer than `target_duration_s` is kept whole (dead head/tail trimmed), with punch-ins and the loop ending. |
+| `polish` | Catalog posts (already edited), and raw clips no longer than `target_duration_s` | Keeps the whole clip. Trims a dead head or tail (static, silent, no speech) of 0.5 s or more. Caps at 180 s. No hook cut, no punch-in, no loop. |
+| `highlight` | Raw clips longer than `target_duration_s` | Picks the best moments, hook first, re-cuts to `target_duration_s`, punch-ins, loop ending. A clip already no longer than `target_duration_s` is kept whole (dead head/tail trimmed), with punch-ins and the loop ending. |
 
-The pipeline sets the mode per source kind. The `[montage] mode` key is overridden there.
+The pipeline sets the mode per item (`Source.mode`), so the `[montage] mode` key is
+overridden there. Raw clips shorter than the top-level `min_duration_s` never reach the engine:
+they go to the review queue as `short`.
 
 In both modes, a plan shorter than `[montage] min_duration_s` (12 s) raises
 `MontageError("too short: ...")` instead of rendering a clip too short to be worth a Short.
