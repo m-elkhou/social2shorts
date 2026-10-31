@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Turn TikTok/Instagram reels and raw moto footage into monetization-safe YouTube Shorts"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "av>=19.0.1",
+    "av>=18.1,<19",  # faster-whisper 1.2.1 calls av.open(metadata_errors=...), removed in av 19
     "faster-whisper>=1.2.1",
     "google-api-python-client>=2.201.0",
     "google-auth-httplib2>=0.4.4",
