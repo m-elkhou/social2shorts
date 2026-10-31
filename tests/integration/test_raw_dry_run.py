@@ -10,7 +10,7 @@ from fakes import NOW, FakeLLM, FakeOriginals, FakePlatform, FakeTranscriber, se
 from social2shorts.config import Settings
 from social2shorts.db import Store
 from social2shorts.media import LocalMedia
-from social2shorts.models import ItemStatus
+from social2shorts.models import ItemStatus, Rendered
 from social2shorts.pipeline import PipelineDeps, RunOptions, SourceChoice, run_pipeline
 from social2shorts.sources.tiktok_instagram import SocialCatalog
 
@@ -39,7 +39,7 @@ class CopyRenderer:
         self.durations.append(LocalMedia().duration(src))
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
-        return dst
+        return Rendered(path=dst, words=words)
 
 
 def test_raw_inbox_dry_run_then_upload(tmp_path):

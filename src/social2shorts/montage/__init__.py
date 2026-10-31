@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from .analyze import Analysis, analyze
-from .captions import build_ass
+from .captions import build_ass, build_srt
 from .errors import MontageError
 from .filters import build_command, build_filter_graph
 from .planner import pick_music, plan_edit, remap_words
@@ -40,6 +40,7 @@ __all__ = [
     "Word",
     "analyze",
     "build_ass",
+    "build_srt",
     "build_command",
     "build_filter_graph",
     "make_short",

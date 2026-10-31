@@ -1,4 +1,4 @@
-"""ASS generation: timing, karaoke tags, escaping, safe-zone layout, hook card."""
+"""ASS generation (timing, karaoke tags, escaping, safe-zone layout, hook card) and SRT."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 import pytest
 
 from social2shorts.montage import CaptionStyle, MontageSettings, Variation, Word, build_ass
-from social2shorts.montage.captions import ass_time, escape_ass, safe_box
+from social2shorts.montage.captions import ass_time, build_srt, escape_ass, safe_box, srt_time
 
 VAR = Variation(accent="&H0000E5FF", caption_y=0.66, hook_y=0.13)
 WORDS = [
@@ -110,3 +110,28 @@ def test_arabic_words_escaped_and_in_order() -> None:
     karaoke = _events(build_ass(words, MontageSettings(), duration=5, variation=VAR))
     assert "{\\c&H00E5FF&}(بكم)" in karaoke[1]
     assert re.sub(r"\{[^}]*\}", "", karaoke[1].split(",,", 2)[-1]).split() == ["مرحبا", "(بكم)"]
+
+
+# ------------------------------------------------------------------------- SRT
+def test_srt_phrase_cues_last_at_least_a_second():
+    assert build_srt(WORDS).splitlines() == [
+        "1", "00:00:00,500 --> 00:00:01,800", "Salut les motards!", "",
+        "2", "00:00:03,000 --> 00:00:04,000", "on roule",
+    ]  # fmt: skip
+
+
+def test_srt_cue_never_runs_into_the_next_one():
+    words = [Word(start=0.0, end=0.2, text="vas-y."), Word(start=0.5, end=0.9, text="go")]
+    assert build_srt(words).splitlines()[:3] == ["1", "00:00:00,000 --> 00:00:00,500", "vas-y."]
+
+
+def test_srt_splits_long_phrases_and_skips_blank_words():
+    words = [Word(start=i * 0.3, end=i * 0.3 + 0.25, text="motorcycle") for i in range(10)]
+    lines = build_srt([*words, Word(start=3.1, end=3.2, text=" ")]).splitlines()
+    texts = [line for line in lines if line.startswith("motorcycle")]
+    assert [len(t.split()) for t in texts] == [7, 3]  # 84 characters (two lines) max per cue
+    assert build_srt([]) == ""
+
+
+def test_srt_time_format():
+    assert srt_time(3725.5) == "01:02:05,500" and srt_time(-1) == "00:00:00,000"

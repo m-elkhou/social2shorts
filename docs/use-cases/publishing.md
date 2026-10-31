@@ -82,23 +82,26 @@ Two limits apply. The first one hit stops the run.
 |---|---|---|
 | API units per day | `daily_quota_units` | 10,000 |
 | Units charged per upload | `upload_cost_units` | 1,600 |
+| Units for the subtitle track (`captions.insert`) | `upload_captions` | 400 |
 | `videos.insert` calls per day | `max_uploads_per_day` | 100 |
 
-Uploads per day = `min(floor(units_left / upload_cost_units), max_uploads_per_day - uploads_today)`.
-Days are Pacific-time days, when Google resets the quota. Other calls also spend units: the
-guard check costs 1 unit per 50 videos, and every privacy change costs 50.
+Uploads per day = `min(floor(units_left / cost), max_uploads_per_day - uploads_today)`, where
+`cost` is `upload_cost_units`, plus 400 when `upload_captions` is on. Days are Pacific-time
+days, when Google resets the quota. Other calls also spend units: the guard check costs 1 unit
+per 50 videos, and every privacy change costs 50.
 
 For **N uploads per day**, 200 videos take `ceil(200 / N)` days:
 
 | Uploads per day (N) | When | Days for 200 videos |
 |---|---|---|
-| 6 | default config: `floor(10000 / 1600)` | 34 |
+| 5 | default config: `floor(10000 / (1600 + 400))` | 40 |
+| 6 | `upload_captions = false`: `floor(10000 / 1600)` | 34 |
 | 2 | you cap runs with `--limit 2` | 100 |
 | 1 | `--limit 1` | 200 |
 | 100 | `upload_cost_units = 100` (current cost, see below) | 2 |
 
 Publication follows the schedule, not the upload rate. With the default 2 slots a day, 200
-scheduled videos go public over **100 days**, even if uploading finished on day 34.
+scheduled videos go public over **100 days**, even if uploading finished on day 40.
 
 !!! tip "Check your real numbers"
     Google has changed upload pricing: the research notes in this site report that

@@ -199,7 +199,8 @@ sequenceDiagram
     P->>L: complete_json(prompt)
     L-->>P: title, description, tags, hook
     P->>R: render(path, words, settings with mode, hook)
-    R-->>P: work/renders/key.mp4
+    R-->>P: work/renders/key.mp4 + words in the Short's time
+    P->>P: save work/subtitles/key.srt
     alt dry run
         P->>DB: status rendered
     else real run
@@ -208,6 +209,10 @@ sequenceDiagram
         YT-->>P: video id, applied privacy
         P->>DB: record_upload (ledger, right away), status uploaded
         P->>Q: spend(upload_cost_units)
+        opt upload_captions and a subtitle language
+            P->>YT: add_captions(id, srt, language, name)
+            P->>Q: spend(400)
+        end
         P->>YT: check_claims([id])
         opt flagged
             P->>YT: set_privacy(private)
@@ -230,7 +235,8 @@ Errors:
   Otherwise each failure counts one attempt for its item and the loop continues.
 - A failed upload call still spends `upload_cost_units`: YouTube may have charged it.
 - Once YouTube accepted a video, nothing is retried. If the ledger write itself fails, the run
-  logs a critical message and records an alert with the video link.
+  logs a critical message and records an alert with the video link. If adding the subtitle
+  track fails, the run records an alert that names the saved SRT to upload in YouTube Studio.
 - A second run started while one holds `work_dir/social2shorts.lock` does nothing and reports
   "another run (pid N) has been working for M min". A lock older than 6 hours is treated as
   stale and replaced.

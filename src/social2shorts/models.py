@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+from social2shorts.montage.types import Word
 
 
 class Platform(StrEnum):
@@ -133,7 +136,7 @@ class ShortMeta(BaseModel):
 
     Attributes:
         title: Video title (<= 100 chars).
-        description: Video description (``#Shorts`` is appended at upload).
+        description: Video description (hashtags ending with ``#Shorts`` are added at upload).
         tags: Content-derived tags.
         hook: Punchy on-screen line for the first seconds (<= 40 chars).
     """
@@ -155,6 +158,13 @@ class Upload(BaseModel):
     publish_at: datetime | None = None
     uploaded_at: datetime
     quota_units: int = 0
+
+
+class Rendered(BaseModel):
+    """A finished Short and its transcript in the Short's own time (for the subtitle track)."""
+
+    path: Path
+    words: list[Word] = Field(default_factory=list)
 
 
 class UploadResult(BaseModel):

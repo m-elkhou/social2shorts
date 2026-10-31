@@ -39,6 +39,9 @@ class YouTubeSettings(BaseModel):
     made_for_kids: bool = False  # status.selfDeclaredMadeForKids
     contains_synthetic_media: bool = False  # status.containsSyntheticMedia (AI disclosure)
     language: str | None = None  # e.g. "fr": sets defaultLanguage + defaultAudioLanguage
+    upload_captions: bool = True  # add the transcript as a subtitle track (captions.insert)
+    caption_language: str | None = None  # track language; None: whisper_language, then language
+    caption_name: str = ""  # track name shown next to the language, e.g. "Darija"
 
 
 class ScheduleSettings(BaseModel):
@@ -75,7 +78,10 @@ class Settings(BaseSettings):
     phone_name_match: str = ""
     phone_video_folders: list[str] = Field(default_factory=list)
     gemini_model: str = "gemini-2.5-flash"
-    whisper_model: str = "small"
+    whisper_model: str = "small"  # size name, or the folder of a converted model
+    whisper_language: str | None = None  # speech language; None: [youtube] language, else detect
+    whisper_vad: bool = True  # skip silence before transcribing (cuts quiet speech on some models)
+    transcript_refine_model: str = ""  # Gemini model that corrects the transcript; "" = off
     sources: SourcesSettings = Field(default_factory=SourcesSettings)
     youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
     schedule: ScheduleSettings = Field(default_factory=ScheduleSettings)

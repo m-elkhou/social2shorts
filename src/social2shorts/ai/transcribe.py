@@ -23,10 +23,17 @@ def load_model(size: str) -> Any:
 class WhisperTranscriber:
     """Transcribes speech with per-word timestamps; silent clips give an empty list."""
 
-    def __init__(self, model_size: str = "small", language: str | None = None, model: Any = None):
+    def __init__(
+        self,
+        model_size: str = "small",
+        language: str | None = None,
+        model: Any = None,
+        vad: bool = True,
+    ):
         self.model_size = model_size
         self.language = language
         self._model = model
+        self.vad = vad  # skip silence; off for the Darija model, whose VAD cut quiet speech
 
     @property
     def model(self) -> Any:
@@ -36,7 +43,7 @@ class WhisperTranscriber:
     def transcribe(self, path: Path) -> list[Word]:
         """Words spoken in ``path`` with their start/end in seconds."""
         segments, _info = self.model.transcribe(
-            str(path), vad_filter=True, word_timestamps=True, language=self.language
+            str(path), vad_filter=self.vad, word_timestamps=True, language=self.language
         )
         words = []
         for seg in segments:

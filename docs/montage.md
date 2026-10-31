@@ -158,7 +158,7 @@ Captions are an ASS file burned in by ffmpeg's `ass` filter. Layout constants ar
 |---|---|
 | `karaoke` | 1–3 uppercase words on screen (≤ 16 characters); the word being spoken is in the accent colour; each cue pops in. A new cue starts on a 0.45 s pause or after punctuation. |
 | `minimal` | Plain phrases of up to 7 words / 34 characters, smaller (62 % size). |
-| `none` | No captions. |
+| `none` | No burned-in captions. The transcript can still go to YouTube as a subtitle track (`[youtube] upload_captions`). |
 
 Arabic and other right-to-left text is written in logical order and shaped by libass
 (fribidi/HarfBuzz). If `caption_font` has no Arabic glyphs, fontconfig substitutes one that
@@ -223,8 +223,9 @@ call-to-action line and fallback titles are picked per item key. See
 - **HDR phone footage** (HLG `arib-std-b67` or PQ `smpte2084`) is tonemapped to SDR BT.709
   first: `zscale` + Hable tonemapping when the ffmpeg build has `zscale`, else a faster
   `colorspace` conversion. Every output is tagged BT.709.
-- **Grade** (`color_grade`): light denoise, contrast ×1.06, saturation ×1.15, gamma 1.04 to
-  lift night shadows, mild sharpening.
+- **Grade** (`color_grade`): contrast ×1.06, saturation ×1.15, gamma 1.04 to lift night
+  shadows, mild sharpening. No denoise: phone footage is clean, and a temporal denoise smeared
+  detail in motion.
 - **Fades**: `fade_s` (0.2 s) in and out, unless the Short loops: a loop must not dip to black.
 - **Progress bar**: an accent-coloured line at the bottom, 8 px high on 1080×1920.
 - **Loudness**: `loudnorm` to `loudness_lufs` (-14 LUFS, the YouTube playback reference),

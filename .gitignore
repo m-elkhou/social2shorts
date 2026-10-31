@@ -13,6 +13,7 @@ __pycache__/
 .ruff_cache/
 inbox/
 logs/
+models/
 coverage.xml
 htmlcov/
 site/

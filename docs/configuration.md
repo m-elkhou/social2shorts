@@ -41,7 +41,55 @@ Older flat config files are upgraded on load: top-level `tiktok_profile_url`,
 | `phone_name_match` | str | `""` | Part of the phone's name in *This PC* (Windows MTP). |
 | `phone_video_folders` | list[str] | `[]` | Folders on the phone to copy from, e.g. `["Movies/Edits"]`. Empty disables phone sync. |
 | `gemini_model` | str | `gemini-2.5-flash` | Model for metadata. Needs `GEMINI_API_KEY`. |
-| `whisper_model` | str | `small` | faster-whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`...). |
+| `whisper_model` | str | `small` | faster-whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`...) or the folder of a converted model, e.g. the [Darija model](#moroccan-darija-subtitles). |
+| `whisper_language` | str \| null | `null` | Speech language for Whisper (`ar`, `fr`, `en`). Unset: `[youtube] language`, else auto-detect. Separate from the metadata language, so Darija speech can get French titles. |
+| `whisper_vad` | bool | `true` | Skip silence before transcribing. Set `false` for the Darija model: the filter cut quiet speech under wind and engine noise. |
+| `transcript_refine_model` | str | `""` | Gemini model that corrects the transcript (spelling, Darija/French script) while keeping the speech model's word timing. Empty: off. Sends the clip's audio to Gemini; falls back to the draft on any error. |
+
+### Moroccan Darija subtitles
+
+General Whisper models write Darija as if it were Modern Standard Arabic and garble the French
+words riders mix in. Two steps fix it:
+
+1. **A Darija speech model** gives every word and its exact timing. Build it once (about 5 minutes,
+   3 GB download, 782 MB result):
+
+    ```bash
+    uv run --no-project --python 3.12 --with torch --with "transformers>=4.46" --with peft \
+        --with ctranslate2 --with huggingface_hub python scripts/convert_darija_whisper.py
+    ```
+
+    It merges [`anaszil/whisper-large-v3-turbo-darija`](https://huggingface.co/anaszil/whisper-large-v3-turbo-darija){ target=_blank }
+    (MIT) into Whisper large-v3-turbo and converts it for faster-whisper (CPU, int8: about 20 s
+    for a 50 s clip).
+
+2. **Gemini corrects the draft** (`transcript_refine_model`): Darija in Arabic script as Moroccans
+   write it, French and English in Latin script, model numbers as digits. The draft's word timings
+   are kept. Gemini is told to leave out what it cannot clearly hear (wind, engine): a missing
+   subtitle is better than a wrong one.
+
+The result goes to YouTube as a **subtitle track** rather than being burned into the image, so
+you can fix any word in YouTube Studio → Subtitles after the upload:
+
+```toml
+whisper_model = "models/whisper-large-v3-turbo-darija-ct2"
+whisper_language = "ar"
+whisper_vad = false
+transcript_refine_model = "gemini-3-flash-preview"
+
+[youtube]
+upload_captions = true
+caption_name = "Darija"
+
+[montage]
+captions = "none"   # no burned-in subtitles
+```
+
+Compared on a real 52 s vlog (31 October 2026): Whisper `small`/`medium` produced mostly wrong
+words; the Darija model alone heard every word but spelled French phonetically in Arabic letters;
+Gemini alone spelled well but skipped passages and timed words loosely. The two-step setup gave a
+timed transcript with correct spelling. Under strong wind the correction still guessed whole
+French phrases until it was told to leave unclear passages out.
 
 ## `[sources]`
 
@@ -67,6 +115,9 @@ Older flat config files are upgraded on load: top-level `tiktok_profile_url`,
 | `made_for_kids` | bool | `false` | `status.selfDeclaredMadeForKids` on every upload and privacy change. |
 | `contains_synthetic_media` | bool | `false` | `status.containsSyntheticMedia`. Set `true` if renders add realistic AI-generated content. |
 | `language` | `fr` \| `en` \| `ar` \| null | `null` | Sets `defaultLanguage` and `defaultAudioLanguage`, the language Gemini writes in, the call-to-action lines and fallback titles, and the Whisper language. Unset: Whisper auto-detects, Gemini follows the caption or transcript (French if there is none), and CTA lines and fallback titles are in French. |
+| `upload_captions` | bool | `true` | After each upload, add the transcript as a YouTube subtitle track (`captions.insert`, 400 units). Viewers turn it on with the CC button; you can fix the text and timing in YouTube Studio → Subtitles. The SRT is also saved in `work/subtitles/<key>.srt`. If adding it fails, the video stays online and an alert gives that file to upload by hand. |
+| `caption_language` | str \| null | `null` | Language code of the subtitle track (`ar`, `fr`...). Unset: `whisper_language`, then `language`. If none is set, no track is added. |
+| `caption_name` | str | `""` | Track name shown next to the language in the player, e.g. `Darija`. |
 
 ## `[schedule]`
 
@@ -113,6 +164,8 @@ phone_name_match = "S23"
 phone_video_folders = ["Movies/Edits", "Movies/Instagram"]
 gemini_model = "gemini-2.5-flash"
 whisper_model = "small"
+# whisper_language = "ar"
+# transcript_refine_model = "gemini-3-flash-preview"
 
 [sources]
 tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
@@ -132,6 +185,9 @@ max_uploads_per_day = 100
 made_for_kids = false
 contains_synthetic_media = false
 # language = "fr"
+upload_captions = true
+# caption_language = "ar"
+# caption_name = "Darija"
 
 [schedule]
 timezone = "Africa/Casablanca"

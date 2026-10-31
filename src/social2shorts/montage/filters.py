@@ -6,7 +6,8 @@ from collections.abc import Callable
 
 from .types import Cut, EditPlan, MediaInfo, MontageSettings
 
-GRADE = "hqdn3d=1.5:1.5:4:4,eq=contrast=1.06:saturation=1.15:gamma=1.04,unsharp=5:5:0.5:5:5:0.0"
+# No denoise: phone footage is clean, and temporal denoise (hqdn3d) smeared detail in motion.
+GRADE = "eq=contrast=1.06:saturation=1.15:gamma=1.04,unsharp=5:5:0.5:5:5:0.0"
 # gamma > 1 lifts shadows slightly so night footage keeps its detail instead of crushing.
 BG_DARKEN = "eq=brightness=-0.12:saturation=0.85"  # blurred background sits behind the subject
 AUDIO_EDGE_S = 0.015  # micro fade at every cut to avoid clicks

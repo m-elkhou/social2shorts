@@ -137,6 +137,6 @@ def test_status_and_schedule(tmp_path):
     store.spend_quota(quota_day(datetime.now(UTC)), 3200, uploads=2)
     r = runner.invoke(app, ["status", "-c", cfg])
     assert r.exit_code == 0 and "discovered" in r.output and "3200/10000" in r.output
-    assert "room for 4 more upload" in r.output
+    assert "room for 3 more upload" in r.output  # 6800 left, 1600 + 400 (subtitles) each
     r = runner.invoke(app, ["schedule", "--count", "2", "-c", cfg])
     assert r.exit_code == 0 and r.output.count("free slot") == 2

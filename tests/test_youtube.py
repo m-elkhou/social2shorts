@@ -37,6 +37,19 @@ def test_build_body_defaults():
     assert "defaultLanguage" not in b["snippet"]
 
 
+def test_description_ends_with_content_hashtags_then_shorts():
+    meta = META.model_copy(
+        update={"tags": ["ktm1390superadventure", "moto", "ktm", "road trip", "Moto", "lc8!"]}
+    )
+    last = build_body(meta, "unlisted")["snippet"]["description"].splitlines()[-1]
+    assert last == "#ktm #moto #lc8 #roadtrip #ktm1390superadventure #Shorts"
+
+
+def test_hashtag_line_stays_under_youtube_limit():
+    line = yt.hashtag_line([f"tag{i}" for i in range(20)])
+    assert line.count("#") == yt.MAX_DESC_HASHTAGS and line.endswith("#Shorts")
+
+
 def test_build_body_schedule_language_and_flags():
     at = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
     b = build_body(META.model_copy(update={"description": "x #shorts"}), "public",
@@ -119,6 +132,42 @@ def test_client_upload_and_set_privacy(tmp_path):
     assert kw["body"]["snippet"]["defaultLanguage"] == "fr"
     client.set_privacy("VID", "public")
     assert videos.calls[1][1]["body"]["status"]["privacyStatus"] == "public"
+
+
+class Captions:
+    def __init__(self, error=None):
+        self.calls, self.error = [], error
+
+    def insert(self, **kw):
+        self.calls.append(kw)
+
+        def execute(num_retries=0):
+            if self.error:
+                raise self.error
+            return {"id": "CAP"}
+
+        return SimpleNamespace(execute=execute)
+
+
+def test_client_add_captions_publishes_the_srt():
+    captions = Captions()
+    client = yt.YouTubeClient("cs.json", "tok.json",
+                              service=SimpleNamespace(captions=lambda: captions))  # fmt: skip
+    srt = "1 | 00:00:00,000 --> 00:00:01,000 | سلام".replace(" | ", chr(10))
+    client.add_captions("VID", srt, language="ar", name="Darija")
+    kw = captions.calls[0]
+    assert kw["part"] == "snippet"
+    assert kw["body"]["snippet"] == {"videoId": "VID", "language": "ar", "name": "Darija",
+                                     "isDraft": False}  # fmt: skip
+    media = kw["media_body"]
+    assert "سلام".encode() in media.getbytes(0, media.size())
+
+
+def test_client_add_captions_reports_spent_quota():
+    client = yt.YouTubeClient("cs.json", "tok.json", service=SimpleNamespace(
+        captions=lambda: Captions(http_error(403, "quotaExceeded"))))  # fmt: skip
+    with pytest.raises(QuotaExceededError):
+        client.add_captions("VID", "srt", language="ar")
 
 
 # ----------------------------------------------------------------- contentid

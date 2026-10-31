@@ -12,7 +12,13 @@ phash_frames = 6
 phone_name_match = "S23"
 phone_video_folders = ["Movies/Edits", "Movies/Instagram"]
 gemini_model = "gemini-2.5-flash"   # needs GEMINI_API_KEY in the environment
-whisper_model = "small"
+whisper_model = "small"            # size name, or the folder of a converted model
+# Moroccan Darija subtitles (see docs: Darija subtitles). Build the model once with
+# scripts/convert_darija_whisper.py, then:
+# whisper_model = "models/whisper-large-v3-turbo-darija-ct2"
+# whisper_language = "ar"
+# whisper_vad = false            # the silence filter cut quiet Darija speech (wind, engine)
+# transcript_refine_model = "gemini-3-flash-preview"   # corrects the draft; sends the audio to Gemini
 
 [sources]
 tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
@@ -34,6 +40,9 @@ contains_synthetic_media = false  # set true if the montage adds realistic AI-ge
 # language = "fr"               # fr | en | ar: sets defaultLanguage/defaultAudioLanguage and the
                                 # whisper language. Unset: CTA lines and fallback titles are in
                                 # French (the audience is mostly francophone Morocco).
+upload_captions = true          # transcript as a YouTube subtitle track (+400 quota units/video)
+# caption_language = "ar"       # track language; unset: whisper_language, then language
+# caption_name = "Darija"       # shown next to the language in the player
 
 [schedule]                      # used with --privacy scheduled
 timezone = "Africa/Casablanca"
@@ -43,4 +52,6 @@ min_lead_minutes = 60
 
 [montage]                       # see social2shorts.montage.types.MontageSettings
 target_duration_s = 35
-captions = "karaoke"
+captions = "karaoke"            # burned-in captions; "none" keeps only the YouTube subtitle track
+width = 1440                    # 1440x2560: YouTube encodes 1440p uploads at a higher quality
+height = 2560                   # than 1080p ones (1080x1920 renders faster)

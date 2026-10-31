@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fakes import FakeLLM, entry, settled
 
 from social2shorts import operations
@@ -83,6 +84,53 @@ def test_dry_run_renders_without_youtube(settings, deps):
     assert r.rendered == ["A"] and r.alert is None
     assert _store(settings).item("A").status is ItemStatus.rendered
     assert (Path(settings.work_dir) / "renders" / "A.mp4").exists()
+    srt = Path(settings.work_dir) / "subtitles" / "A.srt"
+    assert "salut" in srt.read_text(encoding="utf-8")  # saved for review
+
+
+def test_subtitle_track_added_after_upload(settings, deps):
+    settings.whisper_language = "ar"
+    settings.youtube.caption_name = "Darija"
+    run_pipeline(settings, deps, CATALOG)
+    [cap] = deps.platform.captions
+    assert (cap["video_id"], cap["language"], cap["name"]) == ("yt1", "ar", "Darija")
+    assert cap["srt"].splitlines() == ["1", "00:00:00,000 --> 00:00:01,000", "salut"]
+    srt = Path(settings.work_dir) / "subtitles" / "A.srt"
+    assert srt.read_text(encoding="utf-8") == cap["srt"]  # kept to edit or re-upload by hand
+    assert _store(settings).quota_used("2026-10-23")[0] == 1600 + 400 + 1  # insert, captions, guard
+
+
+def test_caption_language_setting_wins(settings, deps):
+    settings.whisper_language, settings.youtube.caption_language = "ar", "fr"
+    run_pipeline(settings, deps, CATALOG)
+    assert deps.platform.captions[0]["language"] == "fr"
+
+
+@pytest.mark.parametrize(("language", "enabled"), [(None, True), ("ar", False)])
+def test_no_subtitle_track_without_language_or_when_off(settings, deps, language, enabled):
+    settings.whisper_language, settings.youtube.upload_captions = language, enabled
+    r = run_pipeline(settings, deps, CATALOG)
+    assert len(r.uploaded) == 1 and deps.platform.captions == []
+    assert _store(settings).open_alerts() == []
+
+
+def test_subtitle_failure_keeps_the_upload_and_alerts(settings, deps):
+    settings.whisper_language = "ar"
+    deps.platform.captions_error = RuntimeError("videoNotFound")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.youtube_id for u in r.uploaded] == ["yt1"] and r.failed == []
+    store = _store(settings)
+    assert store.item("A").status is ItemStatus.uploaded
+    [alert] = store.open_alerts()
+    assert "videoNotFound" in alert["message"] and "A.srt" in alert["message"]
+
+
+def test_subtitle_quota_error_exhausts_the_day(settings, deps):
+    settings.whisper_language = "ar"
+    deps.platform.captions_error = QuotaExceededError("quotaExceeded")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert len(r.uploaded) == 1
+    assert _store(settings).quota_used("2026-10-23")[0] == settings.youtube.daily_quota_units
 
 
 def test_ledger_written_before_guard(settings, deps):
