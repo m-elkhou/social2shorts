@@ -19,7 +19,7 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Protocol
 
-from social2shorts.ai.metadata import GeminiLLM, generate_metadata
+from social2shorts.ai.metadata import GeminiLLM, LLMQuotaExceeded, generate_metadata
 from social2shorts.ai.refine import GeminiAudioRefiner, RefiningTranscriber
 from social2shorts.ai.transcribe import WhisperTranscriber
 from social2shorts.config import Settings
@@ -40,6 +40,7 @@ from social2shorts.models import (
 )
 from social2shorts.montage.captions import build_srt
 from social2shorts.montage.types import MontageMode, Word
+from social2shorts.phash import NoVideoStream
 from social2shorts.ports import (
     LLM,
     CatalogSource,
@@ -169,6 +170,7 @@ class RunReport:
     review: list[str] = field(default_factory=list)
     pending: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    not_video: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     claimed: list[str] = field(default_factory=list)
     alert: str | None = None
@@ -267,9 +269,15 @@ class CatalogStrategy:
                 f"is royalty-free: review --approve {item.key}",
             )  # fmt: skip
             return None
+        try:
+            phashes = _ref_phashes(run, item)
+        except NoVideoStream:
+            run.store.set_status(item.key, ItemStatus.not_video)
+            run.report.not_video.append(item.key)
+            log.info("Skipping %s: a photo slideshow, not a video", item.key)
+            return None
         s = run.settings
-        m = match_one(entry, run.originals, _ref_phashes(run, item), s.duration_tol_s,
-                      s.phash_threshold)  # fmt: skip
+        m = match_one(entry, run.originals, phashes, s.duration_tol_s, s.phash_threshold)
         run.store.set_match(m)
         if m.status is ItemStatus.ambiguous:
             _to_review(
@@ -676,7 +684,7 @@ def _process_queue(run: Run, kinds: list[SourceKind]) -> None:
             break
         try:
             process_item(run, strategy, item)
-        except (AuthRefreshError, QuotaExceededError, ScheduleFull):
+        except (AuthRefreshError, QuotaExceededError, LLMQuotaExceeded, ScheduleFull):
             streak.settle()
             raise
         except Exception as exc:
@@ -721,7 +729,11 @@ def run_pipeline(settings: Settings, deps: PipelineDeps, options: RunOptions) ->
         store.add_alert(report.alert)
         log.error(report.alert)
     except QuotaExceededError:
-        report.stop_reason = "YouTube reports today's quota is spent; continuing tomorrow"
+        report.stop_reason = (
+            "YouTube reports today's quota or upload limit is spent; continuing tomorrow"
+        )
+    except LLMQuotaExceeded as exc:
+        report.stop_reason = f"{exc}; continuing when it resets (midnight Pacific time)"
     except ScheduleFull as exc:
         report.stop_reason = f"publication schedule is full ({exc})"
     return report

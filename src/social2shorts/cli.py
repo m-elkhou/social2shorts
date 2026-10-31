@@ -187,6 +187,7 @@ def _print_report(report: RunReport, dry_run: bool) -> None:
         "needs review": report.review,
         "waiting for original": report.pending,
         "already uploaded": report.skipped,
+        "not a video (photo slideshow)": report.not_video,
         "failed (will retry)": report.failed,
         "made private (claim)": report.claimed,
     }

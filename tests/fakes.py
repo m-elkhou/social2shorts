@@ -85,6 +85,15 @@ class FakeTranscriber:
         return list(self.words)
 
 
+class GeminiDailyQuota(Exception):
+    """Looks like the google-genai 429 for a spent per-day quota."""
+
+    code = 429
+
+    def __str__(self) -> str:
+        return "429 RESOURCE_EXHAUSTED quotaId GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+
+
 @dataclass
 class FakeLLM:
     reply: str = '{"title": "Late ride by the sea", "description": "d", "tags": ["sea"], "hook": "Wait for the turn"}'  # noqa: E501

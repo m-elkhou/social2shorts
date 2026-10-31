@@ -2,12 +2,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from fakes import FakeLLM, entry, settled
+from fakes import FakeLLM, GeminiDailyQuota, entry, settled
 
 from social2shorts import operations
 from social2shorts.db import Store
 from social2shorts.models import Claim, ItemStatus, Privacy
 from social2shorts.montage.types import MontageMode
+from social2shorts.phash import NoVideoStream
 from social2shorts.pipeline import (
     MAX_ATTEMPTS,
     RunOptions,
@@ -284,3 +285,27 @@ def test_missing_raw_file_counts_as_failure(settings, deps):
     r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.raw))
     item = _store(settings).items()[0]
     assert r.failed == [item.key] and item.status is ItemStatus.failed and item.attempts == 1
+
+
+def test_spent_gemini_quota_stops_without_penalty(settings, deps):
+    deps.llm = FakeLLM(error=GeminiDailyQuota())
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.uploaded == [] and "Gemini" in r.stop_reason and r.failed == []
+    item = _store(settings).item("A")
+    assert item.status is not ItemStatus.failed and item.attempts == 0
+
+
+def test_photo_slideshow_is_skipped_for_good(settings, deps):
+    hashes = deps.media.phashes
+
+    def phashes(path, n_frames):
+        if path.stem == "ref-C":
+            raise NoVideoStream(f"{path} has no video stream")
+        return hashes(path, n_frames)
+
+    deps.media.phashes = phashes
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.not_video == ["C"] and "C" not in r.pending and r.failed == []
+    assert _store(settings).item("C").status is ItemStatus.not_video
+    run_pipeline(settings, deps, CATALOG)
+    assert deps.catalog.downloads.count("http://x/C") == 1  # never downloaded again

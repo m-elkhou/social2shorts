@@ -19,6 +19,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ValidationError
 
+from social2shorts.ai.metadata import LLMQuotaExceeded, is_daily_quota_error
 from social2shorts.montage.types import Word
 from social2shorts.ports import Transcriber
 
@@ -37,8 +38,9 @@ DRAFT: {draft}
 Listen to the audio and rewrite the draft correctly, phrase by phrase:
 - Each segment covers draft words first..last (inclusive indices) and gives their correct text. \
 Segments in order, no overlap, 1 to 6 draft words each.
-- Cover the draft words you can clearly hear. Leave out draft words that are noise, wind, or \
-speech you cannot make out: a missing subtitle is better than a wrong one.
+- Subtitle only people talking. Leave out singing and song lyrics, music, noise, wind, and \
+speech you cannot make out: a missing subtitle is better than a wrong one. The draft model \
+writes words even over pure music; if nobody talks, answer with no segments.
 - Darija in Arabic script as Moroccans write it on social media (never Modern Standard Arabic). \
 French and English in Latin script, correctly spelled. Spoken model numbers as digits \
 (mille trois cent quatre-vingt-dix -> 1390).
@@ -85,25 +87,30 @@ def _spread(text: str, start: float, end: float) -> list[Word]:
 def parse_refined(raw: str, draft: Sequence[Word]) -> list[Word]:
     """Words of the LLM reply, timed from the draft words each segment covers.
 
-    Segments with indices outside the draft, overlapping an earlier segment, or holding only a
-    placeholder like ``[...]`` are skipped.
+    Segments holding only a placeholder like ``[...]`` are dropped; no segment at all means
+    nobody talks (music only), so the result is empty. Segments with indices outside the draft
+    or overlapping an earlier segment are skipped.
 
     Raises:
-        ValueError: If the reply does not match :class:`RefinedTranscript` or has no usable segment.
+        ValueError: If the reply does not match :class:`RefinedTranscript`, or every segment
+            with text has unusable indices.
     """
     try:
         segments = RefinedTranscript.model_validate_json(raw).segments
     except ValidationError as exc:
         raise ValueError(f"refined transcript does not match the schema: {exc}") from exc
     words: list[Word] = []
-    last = -1
+    last, bad = -1, 0
     for seg in segments:
         text = seg.text.strip()
-        if not (last < seg.first <= seg.last < len(draft)) or not text or _PLACEHOLDER.match(text):
+        if not text or _PLACEHOLDER.match(text):
+            continue
+        if not (last < seg.first <= seg.last < len(draft)):
+            bad += 1
             continue
         words += _spread(text, draft[seg.first].start, draft[seg.last].end)
         last = seg.last
-    if not words:
+    if bad and not words:
         raise ValueError("refined transcript has no usable segment")
     return words
 
@@ -157,12 +164,18 @@ class RefiningTranscriber:
         self.refiner = refiner
 
     def transcribe(self, path: Path) -> list[Word]:
-        """Draft from ``base``, corrected by ``refiner``; the draft itself if refining fails."""
+        """Draft from ``base``, corrected by ``refiner``; the draft itself if refining fails.
+
+        Raises:
+            LLMQuotaExceeded: If the refiner's daily quota is spent.
+        """
         draft = self.base.transcribe(path)
         if not draft:
             return draft
         try:
             return self.refiner.refine(path, draft)
-        except Exception as exc:  # network, quota, bad reply: captions must not block the run
+        except Exception as exc:  # network, bad reply: captions must not block the run
+            if is_daily_quota_error(exc):
+                raise LLMQuotaExceeded() from exc
             log.warning("Transcript refinement failed (%s); using the speech-model draft", exc)
             return draft

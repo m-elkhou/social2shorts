@@ -126,6 +126,7 @@ stateDiagram-v2
     discovered --> ambiguous: several originals match
     pending_original --> ambiguous: several originals match
     discovered --> too_short: raw clip under min_duration_s
+    discovered --> not_video: photo slideshow post
     discovered --> duplicate: item or source file already uploaded
     discovered --> rendered: dry run
     rendered --> uploading: next real run
@@ -150,6 +151,7 @@ stateDiagram-v2
     claimed --> uploaded: publish with include-claimed
     claimed --> rejected: review reject
     duplicate --> [*]
+    not_video --> [*]
     rejected --> [*]
 ```
 
@@ -228,7 +230,14 @@ Claims can appear hours after upload.
 Errors:
 
 - `AuthRefreshError` stops the run and records an alert (exit code 2).
-- `QuotaExceededError` and `ScheduleFull` stop the run with a reason.
+- `QuotaExceededError` and `ScheduleFull` stop the run with a reason. YouTube's daily quota
+  (403) and the channel's daily upload limit (`uploadLimitExceeded`, 400) both raise
+  `QuotaExceededError`; no item is charged an attempt.
+- `LLMQuotaExceeded` (Gemini's per-day 429; the free tier allows 20 requests per model per
+  day) stops the run too, rather than publish videos with template titles and uncorrected
+  subtitles. Other Gemini errors still fall back (template metadata, speech-model draft).
+- A catalog post whose reference has no video stream (a TikTok photo slideshow comes down as
+  audio) becomes `not_video` and is never retried.
 - Anything else is an item failure, with one exception: if **3 items in a row fail with the
   same error** (`SYSTEMIC_FAILURES`), it is treated as a system fault (no network, a model
   download failed...). The run stops, records an alert, and no item is charged an attempt.
