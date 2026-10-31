@@ -122,6 +122,22 @@ def _genai_client() -> Any:
     return genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY
 
 
+class LLMQuotaExceeded(Exception):
+    """The model's daily request quota is spent. The run stops rather than publish videos with
+    template titles and uncorrected subtitles."""
+
+    def __init__(self, message: str = "Gemini daily request quota is spent"):
+        super().__init__(message)
+
+
+def is_daily_quota_error(exc: BaseException) -> bool:
+    """True for Gemini's per-day 429 (the free tier allows 20 requests per model per day).
+
+    Per-minute 429s are not matched: the usual fallback applies to them.
+    """
+    return getattr(exc, "code", None) == 429 and "PerDay" in str(exc)
+
+
 class GeminiLLM:
     """``LLM`` adapter over the ``google-genai`` SDK (JSON response mode)."""
 
@@ -331,7 +347,10 @@ def generate_metadata(
     language: str | None = None,
     hint: str = "",
 ) -> ShortMeta:
-    """LLM-written metadata; any LLM failure falls back to :func:`fallback_meta` (never raises).
+    """LLM-written metadata; an LLM failure falls back to :func:`fallback_meta`.
+
+    Raises:
+        LLMQuotaExceeded: If the model's daily quota is spent (the only error not absorbed).
 
     Args:
         llm: The model, or None to use the fallback directly.
@@ -347,6 +366,8 @@ def generate_metadata(
     try:
         raw = _parse_json(llm.complete_json(build_prompt(caption, transcript, language)))
         return sanitize_meta(raw, caption=caption, key=key, language=lang)
-    except Exception as exc:  # quota, network, bad JSON, empty title...
+    except Exception as exc:  # network, bad JSON, empty title...
+        if is_daily_quota_error(exc):
+            raise LLMQuotaExceeded() from exc
         log.warning("LLM metadata failed for %s (%s); using fallback title", key, exc)
         return fallback_meta(caption, key, lang, transcript, hint)

@@ -15,16 +15,26 @@ _SENTINEL = 10**9
 _FALLBACK_STRIDE = 30  # frames between samples when the duration is unknown
 
 
+class NoVideoStream(ValueError):
+    """The file has no picture, e.g. a TikTok photo slideshow downloaded as audio."""
+
+
 def sample_times(duration: float, n_frames: int) -> list[float]:
     """``n_frames`` timestamps evenly spread inside ``(0, duration)`` (frame-centred)."""
     return [duration * (i + 0.5) / n_frames for i in range(n_frames)]
 
 
 def phash_file(path: str | Path, n_frames: int) -> list[str]:
-    """Hex pHashes of ``n_frames`` frames, found by seeking (never decodes the whole file)."""
+    """Hex pHashes of ``n_frames`` frames, found by seeking (never decodes the whole file).
+
+    Raises:
+        NoVideoStream: If the file has no video stream.
+    """
     if n_frames <= 0:
         return []
     with av.open(str(path)) as container:
+        if not container.streams.video:
+            raise NoVideoStream(f"{path} has no video stream")
         stream = container.streams.video[0]
         duration = _duration(container, stream)
         if duration <= 0:

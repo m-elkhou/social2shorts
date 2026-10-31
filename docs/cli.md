@@ -85,7 +85,8 @@ uv run social2shorts run --source raw --privacy scheduled --continuous
 ```
 
 Prints a report with these buckets: uploaded, rendered, needs review, waiting for original,
-already uploaded, failed (will retry), made private (claim). Exits 2 on an auth alert.
+already uploaded, not a video (photo slideshow), failed (will retry), made private (claim).
+Exits 2 on an auth alert.
 
 Only one run works at a time (lock file `work_dir/social2shorts.lock`). A second run stops at
 once with "another run (pid N) has been working for M min; this run did nothing".

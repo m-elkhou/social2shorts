@@ -45,6 +45,7 @@ class ItemStatus(StrEnum):
     ready = "ready"  # approved by a human: processed first on the next run
     failed = "failed"  # processing error: retried until MAX_ATTEMPTS, then reviewed
     too_short = "too_short"  # raw clip below min_duration_s: a human decides
+    not_video = "not_video"  # photo slideshow post: nothing to match or render, never retried
     rendered = "rendered"  # dry run output only
     uploading = "uploading"  # API call in flight; left behind only if the run crashed
     uploaded = "uploaded"

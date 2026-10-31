@@ -65,8 +65,10 @@ words riders mix in. Two steps fix it:
 
 2. **Gemini corrects the draft** (`transcript_refine_model`): Darija in Arabic script as Moroccans
    write it, French and English in Latin script, model numbers as digits. The draft's word timings
-   are kept. Gemini is told to leave out what it cannot clearly hear (wind, engine): a missing
-   subtitle is better than a wrong one.
+   are kept. Gemini subtitles only people talking: it leaves out song lyrics, music and what it
+   cannot clearly hear (wind, engine), because a missing subtitle is better than a wrong one. On
+   a music-only clip the speech model still writes words ("موسيقى", "اشتركوا في القناة"); Gemini
+   answers with no segments and the video gets no subtitle track.
 
 The result goes to YouTube as a **subtitle track** rather than being burned into the image, so
 you can fix any word in YouTube Studio → Subtitles after the upload:

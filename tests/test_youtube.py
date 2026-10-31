@@ -104,6 +104,8 @@ def test_non_transient_and_quota_errors_are_not_retried():
         run_resumable(Chunks(http_error(400, "invalidTitle")), sleep=pytest.fail)
     with pytest.raises(QuotaExceededError):
         run_resumable(Chunks(http_error(403, "quotaExceeded")), sleep=pytest.fail)
+    with pytest.raises(QuotaExceededError):  # the channel's daily upload limit
+        run_resumable(Chunks(http_error(400, "uploadLimitExceeded")), sleep=pytest.fail)
 
 
 class Videos:

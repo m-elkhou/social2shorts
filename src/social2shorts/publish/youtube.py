@@ -182,10 +182,14 @@ def _reasons(exc: HttpError) -> set[str]:
 
 
 def is_quota_error(exc: BaseException) -> bool:
-    """True for HTTP 403 errors that mean the daily quota or upload limit is spent."""
+    """True for errors that mean the daily quota or the channel's upload limit is spent.
+
+    Quota errors come as 403; ``uploadLimitExceeded`` ("The user has exceeded the number of
+    videos they may upload") comes as 400.
+    """
     return (
         isinstance(exc, HttpError)
-        and exc.resp.status == 403
+        and exc.resp.status in (400, 403)
         and bool(_reasons(exc) & QUOTA_REASONS)
     )
 

@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from fakes import GeminiDailyQuota
 
+from social2shorts.ai.metadata import LLMQuotaExceeded
 from social2shorts.ai.refine import RefiningTranscriber, build_prompt, parse_refined
 from social2shorts.montage.types import Word
 
@@ -22,7 +24,7 @@ def reply(*segments: tuple[int, int, str]) -> str:
 def test_prompt_numbers_the_draft_words():
     prompt = build_prompt(DRAFT)
     assert "0:ستو 1:بير 2:ادفانتر 3:بوات 4:اوتوماتيك" in prompt
-    assert "Darija" in prompt and "Latin script" in prompt
+    assert "Darija" in prompt and "Latin script" in prompt and "song lyrics" in prompt
 
 
 def test_parse_times_corrected_text_from_the_draft():
@@ -38,7 +40,7 @@ def test_parse_skips_placeholders_bad_ranges_and_overlaps():
     assert [w.text for w in parse_refined(raw, DRAFT)] == ["ok"]
 
 
-@pytest.mark.parametrize("raw", ["not json", "{}", '{"segments": []}', reply((3, 1, "x"))])
+@pytest.mark.parametrize("raw", ["not json", "{}", reply((3, 1, "x")), reply((0, 9, "x"))])
 def test_parse_rejects_unusable_replies(raw):
     with pytest.raises(ValueError):
         parse_refined(raw, DRAFT)
@@ -95,3 +97,19 @@ def test_refining_transcriber_skips_silent_clips():
     refiner = Refiner([Word(start=0, end=1, text="x")])
     assert RefiningTranscriber(Base([]), refiner).transcribe(Path("v.mp4")) == []
     assert refiner.calls == 0
+
+
+@pytest.mark.parametrize("raw", ['{"segments": []}', reply((0, 2, "[music]"))])
+def test_parse_no_speech_gives_no_subtitles(raw):
+    assert parse_refined(raw, DRAFT) == []  # music only: the draft's words were invented
+
+
+def test_refining_transcriber_stops_on_spent_daily_quota():
+    with pytest.raises(LLMQuotaExceeded):
+        RefiningTranscriber(Base(DRAFT), Refiner(error=GeminiDailyQuota())).transcribe(Path("v"))
+
+
+def test_refining_transcriber_falls_back_on_per_minute_limit():
+    minute = RuntimeError("429 RESOURCE_EXHAUSTED GenerateRequestsPerMinutePerProjectPerModel")
+    minute.code = 429
+    assert RefiningTranscriber(Base(DRAFT), Refiner(error=minute)).transcribe(Path("v")) == DRAFT
