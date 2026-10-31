@@ -13,7 +13,7 @@ from social2shorts.models import ItemStatus, MatchResult, Upload
 from social2shorts.ports import VideoPlatform
 from social2shorts.publish.quota import QuotaBudget
 from social2shorts.publish.scheduler import upcoming_slots
-from social2shorts.publish.youtube import COST_UPDATE, AuthRefreshError
+from social2shorts.publish.youtube import COST_UPDATE, AuthRefreshError, upload_units
 
 log = logging.getLogger(__name__)
 
@@ -180,7 +180,9 @@ def summary(settings: Settings, store: Store, now: datetime, slots: int = 5) -> 
         counts=store.status_counts(),
         quota_used=budget.used(),
         quota_daily=budget.daily_units,
-        uploads_left_today=budget.uploads_left(yt.upload_cost_units),
+        uploads_left_today=budget.uploads_left(
+            upload_units(yt.upload_cost_units, yt.upload_captions)
+        ),
         scheduled=scheduled,
         next_slots=upcoming_slots(now, store.publish_times(), settings.schedule, slots),
         reviews=len(store.reviews()),

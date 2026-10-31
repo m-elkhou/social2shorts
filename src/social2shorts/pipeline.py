@@ -1,7 +1,8 @@
 """Pipeline orchestration: one shared item processor, with a strategy per source kind.
 
 Per item: dedupe -> prepare (catalog: audio gate, reference download, match | raw: inbox file)
--> transcribe -> metadata -> render -> quota/schedule -> upload -> ledger -> Content-ID guard.
+-> transcribe -> metadata -> render -> quota/schedule -> upload -> ledger -> subtitle track
+-> Content-ID guard.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Protocol
 
 from social2shorts.ai.metadata import GeminiLLM, generate_metadata
+from social2shorts.ai.refine import GeminiAudioRefiner, RefiningTranscriber
 from social2shorts.ai.transcribe import WhisperTranscriber
 from social2shorts.config import Settings
 from social2shorts.curate import curate
@@ -36,7 +38,8 @@ from social2shorts.models import (
     SourceKind,
     Upload,
 )
-from social2shorts.montage.types import MontageMode
+from social2shorts.montage.captions import build_srt
+from social2shorts.montage.types import MontageMode, Word
 from social2shorts.ports import (
     LLM,
     CatalogSource,
@@ -50,11 +53,13 @@ from social2shorts.publish.contentid import BATCH
 from social2shorts.publish.quota import QuotaBudget
 from social2shorts.publish.scheduler import ScheduleFull, next_slot
 from social2shorts.publish.youtube import (
+    COST_CAPTION,
     COST_LIST,
     COST_UPDATE,
     AuthRefreshError,
     QuotaExceededError,
     YouTubeClient,
+    upload_units,
 )
 from social2shorts.renderer import MontageRenderer
 from social2shorts.sources.inbox import scan_inbox
@@ -106,6 +111,15 @@ class PipelineDeps:
         has_key = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
         if not has_key:
             log.warning("GEMINI_API_KEY is not set: titles will come from captions/templates")
+        transcriber: Transcriber = WhisperTranscriber(
+            settings.whisper_model,
+            settings.whisper_language or yt.language,
+            vad=settings.whisper_vad,
+        )
+        if has_key and settings.transcript_refine_model:
+            transcriber = RefiningTranscriber(
+                transcriber, GeminiAudioRefiner(settings.transcript_refine_model)
+            )
         return cls(
             catalog=SocialCatalog(
                 src.tiktok_profile_url, src.instagram_profile_url, src.instagram_cookies
@@ -115,7 +129,7 @@ class PipelineDeps:
                 settings.phone_video_folders,
             ),
             media=LocalMedia(),
-            transcriber=WhisperTranscriber(settings.whisper_model, yt.language),
+            transcriber=transcriber,
             llm=GeminiLLM(settings.gemini_model) if has_key else None,
             renderer=MontageRenderer(),
             platform=YouTubeClient(
@@ -393,21 +407,77 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
         language=run.settings.youtube.language,
         hint=_hint(item, source.path),
     )
-    out = run.deps.renderer.render(
+    rendered = run.deps.renderer.render(
         source.path,
         run.work_dir / "renders" / f"{item.key}.mp4",
         words=words,
         settings=run.settings.montage.model_copy(update={"mode": source.mode}),
         hook=meta.hook or None,
     )
+    out = rendered.path
+    srt = _save_subtitles(run, item, rendered.words)
     if run.options.dry_run:
         run.store.set_status(item.key, ItemStatus.rendered)
         run.report.rendered.append(item.key)
         log.info("Rendered %s -> %s (%r)", item.key, out, meta.title)
         return
     upload = _upload(run, item, out, meta, sha)
+    _add_captions(run, item, upload, srt)
     _guard(run, [upload])
     _remove(out)
+
+
+def _subtitles_path(run: Run, item: Item) -> Path:
+    return run.work_dir / "subtitles" / f"{item.key}.srt"
+
+
+def _save_subtitles(run: Run, item: Item, words: list[Word]) -> str | None:
+    """Write the Short's subtitles (SRT) under ``work/subtitles``; kept for review and re-upload.
+
+    Returns the SRT text, or None when there is no speech.
+    """
+    srt = build_srt(words)
+    if not srt:
+        return None
+    path = _subtitles_path(run, item)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(srt, encoding="utf-8")
+    return srt
+
+
+def _add_captions(run: Run, item: Item, upload: Upload, srt: str | None) -> None:
+    """Publish the subtitle track. Never raises: the video is already on YouTube."""
+    yt = run.settings.youtube
+    if not (yt.upload_captions and srt):
+        return
+    language = yt.caption_language or run.settings.whisper_language or yt.language
+    if not language:  # a setup choice, not a failure: no alert
+        log.info("No subtitle track for %s: set [youtube] caption_language", item.key)
+        return
+    why = None
+    if not run.budget.can_afford(COST_CAPTION):
+        why = "not enough YouTube quota left today"
+    else:
+        try:
+            run.deps.platform.add_captions(
+                upload.youtube_id, srt, language=language, name=yt.caption_name
+            )
+            run.budget.spend(COST_CAPTION)
+            log.info("Added %s subtitles to https://youtu.be/%s", language, upload.youtube_id)
+            return
+        except Exception as exc:  # the upload is recorded: report, never retry the item
+            if isinstance(exc, QuotaExceededError):
+                run.budget.exhaust()
+            elif not isinstance(exc, AuthRefreshError):
+                run.budget.spend(COST_CAPTION)
+            why = _signature(exc)
+    message = (
+        f"Subtitles of {item.key} (https://youtu.be/{upload.youtube_id}) were not added ({why}). "
+        f"Upload {_subtitles_path(run, item)} in YouTube Studio > Subtitles."
+    )
+    log.warning(message)
+    with contextlib.suppress(Exception):
+        run.store.add_alert(message)
 
 
 def _publish_target(run: Run) -> tuple[str, datetime | None]:
@@ -586,7 +656,8 @@ def _queue(run: Run, kinds: list[SourceKind]) -> Iterator[tuple[SourceStrategy, 
 
 def _quota_stop(run: Run) -> str | None:
     budget, yt = run.budget, run.settings.youtube
-    if run.options.dry_run or budget.uploads_left(yt.upload_cost_units) > 0:
+    cost = upload_units(yt.upload_cost_units, yt.upload_captions)
+    if run.options.dry_run or budget.uploads_left(cost) > 0:
         return None
     return (
         f"daily YouTube quota spent ({budget.used()}/{budget.daily_units} units, "

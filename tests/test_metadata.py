@@ -109,3 +109,7 @@ def test_transcriber_returns_words():
     words = WhisperTranscriber(model=Model(), language="fr").transcribe("x.mp4")
     assert words == [Word(start=0.0, end=0.4, text="Salut")]
     assert seen["word_timestamps"] is True and seen["language"] == "fr"
+    assert seen["vad_filter"] is True  # default: skip silence
+
+    WhisperTranscriber(model=Model(), vad=False).transcribe("x.mp4")
+    assert seen["vad_filter"] is False  # Darija model: VAD cut quiet speech

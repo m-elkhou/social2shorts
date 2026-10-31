@@ -21,6 +21,13 @@ def test_defaults(tmp_path):
     assert s.montage.mode is MontageMode.highlight
 
 
+def test_transcription_defaults_and_overrides(tmp_path):
+    s = load_config(_write(tmp_path, ""))
+    assert s.whisper_language is None and s.transcript_refine_model == "" and s.whisper_vad is True
+    s = load_config(_write(tmp_path, 'whisper_language = "ar"\ntranscript_refine_model = "m"\n'))
+    assert s.whisper_language == "ar" and s.transcript_refine_model == "m"
+
+
 def test_sections(tmp_path):
     s = load_config(_write(tmp_path, """
 [sources]

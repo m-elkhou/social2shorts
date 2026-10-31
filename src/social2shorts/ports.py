@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from social2shorts.models import CatalogEntry, Claim, ShortMeta, UploadResult
+from social2shorts.models import CatalogEntry, Claim, Rendered, ShortMeta, UploadResult
 from social2shorts.montage.types import MontageSettings, Word
 
 
@@ -58,7 +58,7 @@ class Renderer(Protocol):
         words: list[Word],
         settings: MontageSettings,
         hook: str | None,
-    ) -> Path: ...
+    ) -> Rendered: ...
 
 
 class VideoPlatform(Protocol):
@@ -69,5 +69,7 @@ class VideoPlatform(Protocol):
     ) -> UploadResult: ...
 
     def set_privacy(self, video_id: str, privacy: str) -> None: ...
+
+    def add_captions(self, video_id: str, srt: str, *, language: str, name: str) -> None: ...
 
     def check_claims(self, video_ids: list[str]) -> list[Claim]: ...

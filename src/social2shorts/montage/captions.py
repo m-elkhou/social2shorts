@@ -1,4 +1,5 @@
-"""Build the ASS subtitle file: karaoke/minimal captions and the hook title card.
+"""Build the ASS subtitle file (karaoke/minimal captions and the hook title card) and the SRT
+subtitle track uploaded next to the video.
 
 Arabic/RTL text is written in logical order and shaped by libass (fribidi/HarfBuzz) at burn-in
 time. caption_font_fallback: if ``caption_font`` lacks Arabic glyphs, fontconfig substitutes a
@@ -17,6 +18,9 @@ CUE_MAX_CHARS = 16  # karaoke: break earlier for long words
 PHRASE_MAX_WORDS = 7  # minimal: words per phrase
 PHRASE_MAX_CHARS = 34
 CUE_GAP_S = 0.45  # a pause this long starts a new cue
+SUB_MAX_WORDS = 16  # subtitle track (SRT): words per cue
+SUB_MAX_CHARS = 84  # subtitle track: two lines of 42 (the player wraps them)
+SUB_MIN_S = 1.0  # subtitle track: shortest cue, unless the next one starts sooner
 REF_CANVAS = (1080, 1920)  # layout constants below are specified on this canvas
 SAFE_BOX = (900, 1400)  # centred box clear of Shorts UI on every platform (scaled to output)
 RIGHT_UI_MARGIN = 0.14  # right margin: Shorts action buttons live there (stricter than the box)
@@ -104,6 +108,31 @@ CAPTION_STYLES: dict[CaptionStyle, Callable[[Sequence[Word], str], list[str]]] =
     CaptionStyle.minimal: _minimal,
     CaptionStyle.none: lambda words, accent: [],
 }
+
+
+def srt_time(t: float) -> str:
+    """Format seconds as SubRip ``HH:MM:SS,mmm``."""
+    ms = max(round(t * 1000), 0)
+    return f"{ms // 3_600_000:02d}:{ms // 60_000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
+
+
+def build_srt(words: Sequence[Word]) -> str:
+    """SubRip file for a platform subtitle track (viewers can turn it on; the owner can edit it).
+
+    Words must already be in OUTPUT time. Cues are phrases split on pauses, sentence punctuation
+    and :data:`SUB_MAX_CHARS`; each stays at least :data:`SUB_MIN_S`, never past the next cue.
+    Empty when there are no words.
+    """
+    cues = _group([w for w in words if w.text.strip()], SUB_MAX_WORDS, SUB_MAX_CHARS)
+    blocks = []
+    for i, cue in enumerate(cues):
+        start = cue[0].start
+        end = max(cue[-1].end, start + SUB_MIN_S)
+        if i + 1 < len(cues):
+            end = min(end, cues[i + 1][0].start)
+        text = " ".join(" ".join(w.text.split()) for w in cue)
+        blocks.append(f"{i + 1}\n{srt_time(start)} --> {srt_time(end)}\n{text}\n")
+    return "\n".join(blocks)
 
 
 def safe_box(width: int, height: int) -> tuple[int, int, int, int]:

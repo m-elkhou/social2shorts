@@ -24,10 +24,13 @@ stored elsewhere by social2shorts.
 ## What is sent to third parties
 
 - **Google, YouTube Data API:** the rendered video, its title, description and tags, and its
-  visibility settings, so that it can be published on your channel.
+  visibility settings, so that it can be published on your channel. With `upload_captions` on,
+  also the speech transcript, as the video's subtitle track.
 - **Google, Gemini API**, only if you set `GEMINI_API_KEY`: the post's caption and the speech
   transcript of the video, so that Gemini can write the title, description, tags and on-screen
-  hook. Without a key, nothing is sent to Gemini.
+  hook. If you turn on transcript correction (`transcript_refine_model`), the **audio track of the
+  video** is sent too, so that Gemini can correct the subtitles. Without a key, nothing is sent
+  to Gemini.
 
 Nothing else is sent anywhere. There are no analytics, no advertising and no tracking.
 

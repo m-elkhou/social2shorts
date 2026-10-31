@@ -12,7 +12,14 @@ phash_frames = 6
 phone_name_match = "S23"
 phone_video_folders = ["Movies/Edits", "Movies/Instagram"]
 gemini_model = "gemini-3.8-flash"   # needs GEMINI_API_KEY in the environment (2.5-flash retired for new users, 2026-10-31)
-whisper_model = "small"
+# Moroccan Darija subtitles: a Darija speech model gives the words and their timing, then Gemini
+# corrects the spelling (Darija in Arabic script, French in Latin script) keeping that timing.
+# Build the model once with scripts/convert_darija_whisper.py. Refinement sends the clip's audio
+# to Gemini; set transcript_refine_model = "" to keep the speech model's draft as is.
+whisper_model = "models/whisper-large-v3-turbo-darija-ct2"
+whisper_language = "ar"
+whisper_vad = false             # the silence filter cut quiet Darija speech (wind, engine)
+transcript_refine_model = "gemini-3-flash-preview"
 
 [sources]
 tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
@@ -34,6 +41,9 @@ contains_synthetic_media = false  # set true if the montage adds realistic AI-ge
 # language = "fr"               # fr | en | ar: sets defaultLanguage/defaultAudioLanguage and the
                                 # whisper language. Unset: CTA lines and fallback titles are in
                                 # French (the audience is mostly francophone Morocco).
+upload_captions = true          # transcript as a YouTube subtitle track (+400 quota units/video),
+                                # editable in YouTube Studio; language = whisper_language ("ar")
+caption_name = "Darija"
 
 [schedule]                      # used with --privacy scheduled
 timezone = "Africa/Casablanca"
@@ -43,4 +53,6 @@ min_lead_minutes = 60
 
 [montage]                       # see social2shorts.montage.types.MontageSettings
 target_duration_s = 35
-captions = "karaoke"
+captions = "none"              # no burned-in subtitles: they go to YouTube as a subtitle track
+width = 1440                    # 1440x2560: phone originals are QHD, and YouTube encodes
+height = 2560                   # 1440p uploads at a higher quality than 1080p ones

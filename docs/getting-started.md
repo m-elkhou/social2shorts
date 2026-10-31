@@ -144,7 +144,8 @@ The uploader uses the YouTube Data API v3 with an OAuth "Desktop app" client. Yo
 ### Quota
 
 The default allocation is 10,000 units per day, reset at midnight Pacific time. The config
-assumes `videos.insert` costs 1,600 units, so about **6 uploads per day**. A separate cap on
+assumes `videos.insert` costs 1,600 units, plus 400 for the subtitle track, so about **5 uploads
+per day**. A separate cap on
 `videos.insert` calls (`max_uploads_per_day`, 100) is enforced too. Check *APIs & Services →
 YouTube Data API v3 → Quotas* in your project and adjust `[youtube] upload_cost_units` and
 `daily_quota_units` to match. See [Publishing and quota](use-cases/publishing.md) for the math.

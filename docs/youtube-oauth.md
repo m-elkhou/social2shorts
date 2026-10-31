@@ -274,8 +274,9 @@ Open [YouTube Studio → Content](https://studio.youtube.com){ target=_blank } a
 | History | Uploads cost about 1,600 units until 2025-12-04. On 2026-06-01 `videos.insert` and `search.list` moved to their own buckets. | [Revision history](https://developers.google.com/youtube/data/revision_history){ target=_blank } |
 
 !!! warning "social2shorts defaults still use the old cost"
-    `config.toml` has `upload_cost_units = 1600`, which makes the program plan for about 6 uploads
-    a day. That was the real limit before December 2025. Check your own numbers on the
+    `config.toml` has `upload_cost_units = 1600`, plus 400 per subtitle track
+    (`captions.insert`), which makes the program plan for about 5 uploads a day. The 1,600 was
+    the real upload cost before December 2025. Check your own numbers on the
     [Quotas page](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas){ target=_blank }
     and adjust `[youtube] upload_cost_units` and `daily_quota_units` if they differ.
 

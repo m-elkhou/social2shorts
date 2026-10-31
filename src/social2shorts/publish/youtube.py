@@ -1,14 +1,17 @@
-"""YouTube Data API adapter (``VideoPlatform``): OAuth, retried resumable upload, privacy."""
+"""YouTube Data API adapter (``VideoPlatform``): OAuth, retried resumable upload, privacy,
+subtitle tracks."""
 
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import logging
 import os
 import random
+import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,9 +33,11 @@ SCOPES = [
 ]
 COST_LIST = 1  # videos.list
 COST_UPDATE = 50  # videos.update
+COST_CAPTION = 400  # captions.insert
 TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504})  # other 4xx are never retried
 QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", "uploadLimitExceeded"})
 MAX_TAGS_CHARS = 450  # YouTube rejects more than 500 characters of tags
+MAX_DESC_HASHTAGS = 8  # YouTube ignores every hashtag of a description that has more than 15
 MAX_RETRIES = 8
 
 
@@ -101,11 +106,25 @@ def rfc3339(dt: datetime) -> str:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def with_shorts_tag(description: str) -> str:
-    """Append ``#Shorts`` unless the description already has it."""
+def hashtag_line(tags: Sequence[str], limit: int = MAX_DESC_HASHTAGS) -> str:
+    """Hashtags for the end of a description: shortest content tags first, ``#Shorts`` last.
+
+    YouTube shows the first three hashtags above the title, so the broad, short tags
+    (``#moto``, ``#ktm``) lead. Hashtags cannot hold spaces or punctuation.
+    """
+    words: list[str] = []
+    for tag in sorted(tags, key=len):  # stable: equal lengths keep the LLM's order
+        word = re.sub(r"\W", "", str(tag))
+        if word and word.lower() not in {w.lower() for w in words} | {"shorts"}:
+            words.append(word)
+    return " ".join([*(f"#{w}" for w in words[: limit - 1]), "#Shorts"])
+
+
+def with_hashtags(description: str, tags: Sequence[str]) -> str:
+    """Append the hashtag line, unless the description already carries ``#Shorts``."""
     if "#shorts" in description.lower():
         return description
-    return f"{description}\n\n#Shorts".strip()
+    return f"{description}\n\n{hashtag_line(tags)}".strip()
 
 
 def _fit_tags(tags: list[str]) -> list[str]:
@@ -130,7 +149,7 @@ def build_body(
     """``videos.insert`` body; a ``publish_at`` forces ``private`` + scheduled publication."""
     snippet: dict[str, Any] = {
         "title": meta.title,
-        "description": with_shorts_tag(meta.description),
+        "description": with_hashtags(meta.description, meta.tags),
         "tags": _fit_tags(meta.tags),
         "categoryId": category_id,
     }
@@ -146,6 +165,11 @@ def build_body(
         status["privacyStatus"] = "private"
         status["publishAt"] = rfc3339(publish_at)
     return {"snippet": snippet, "status": status}
+
+
+def upload_units(upload_cost: int, captions: bool) -> int:
+    """Quota one Short needs: ``videos.insert``, plus ``captions.insert`` for its subtitles."""
+    return upload_cost + (COST_CAPTION if captions else 0)
 
 
 # --------------------------------------------------------------------- retry
@@ -271,6 +295,26 @@ class YouTubeClient:
                   "containsSyntheticMedia": self.synthetic_media}  # fmt: skip
         body = {"id": video_id, "status": status}
         self.service.videos().update(part="status", body=body).execute(num_retries=3)
+
+    def add_captions(self, video_id: str, srt: str, *, language: str, name: str = "") -> None:
+        """Publish ``srt`` as a subtitle track of ``video_id`` (``captions.insert``).
+
+        Raises:
+            QuotaExceededError: If YouTube reports the quota is spent.
+        """
+        from googleapiclient.http import MediaIoBaseUpload
+
+        snippet = {"videoId": video_id, "language": language, "name": name, "isDraft": False}
+        media = MediaIoBaseUpload(io.BytesIO(srt.encode("utf-8")), "application/octet-stream")
+        request = self.service.captions().insert(
+            part="snippet", body={"snippet": snippet}, media_body=media
+        )
+        try:
+            request.execute(num_retries=3)
+        except HttpError as exc:
+            if is_quota_error(exc):
+                raise QuotaExceededError(str(exc)) from exc
+            raise
 
     def check_claims(self, video_ids: list[str]) -> list[Claim]:
         """See :func:`social2shorts.publish.contentid.check_claims`."""

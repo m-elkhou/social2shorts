@@ -7,7 +7,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from social2shorts.models import CatalogEntry, Claim, Platform, ShortMeta, UploadResult
+from social2shorts.models import (
+    CatalogEntry,
+    Claim,
+    Platform,
+    Rendered,
+    ShortMeta,
+    UploadResult,
+)
 from social2shorts.montage.types import MontageSettings, Word
 
 NOW = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
@@ -97,7 +104,7 @@ class FakeRenderer:
         self.calls.append({"src": src, "mode": settings.mode, "hook": hook, "words": words})
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(b"short")
-        return dst
+        return Rendered(path=dst, words=words)
 
 
 @dataclass
@@ -108,6 +115,8 @@ class FakePlatform:
     upload_error: Exception | None = None
     claims_error: Exception | None = None
     force_privacy: str | None = None
+    captions: list[dict] = field(default_factory=list)
+    captions_error: Exception | None = None
 
     def upload(self, path: Path, meta: ShortMeta, *, privacy: str, publish_at) -> UploadResult:
         if self.upload_error:
@@ -120,6 +129,11 @@ class FakePlatform:
 
     def set_privacy(self, video_id: str, privacy: str) -> None:
         self.privacy_changes.append((video_id, privacy))
+
+    def add_captions(self, video_id: str, srt: str, *, language: str, name: str) -> None:
+        if self.captions_error:
+            raise self.captions_error
+        self.captions.append({"video_id": video_id, "srt": srt, "language": language, "name": name})
 
     def check_claims(self, video_ids: list[str]) -> list[Claim]:
         if self.claims_error:
