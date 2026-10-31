@@ -101,6 +101,11 @@ also come from an environment variable such as `S2S_YOUTUBE__LANGUAGE=fr`.
 
 The uploader uses the YouTube Data API v3 with an OAuth "Desktop app" client. You do this once.
 
+!!! tip "Step-by-step guide with direct links"
+    [Connect YouTube: create `client_secret.json`](youtube-oauth.md) walks through every console
+    page and button, shows what you should see, and lists the common errors. The summary below is
+    the short version.
+
 1. **Create a project.** Open the [Google Cloud console](https://console.cloud.google.com/),
    create a project (for example `social2shorts`) and select it.
 2. **Enable the API.** *APIs & Services → Library*, search **YouTube Data API v3**, click

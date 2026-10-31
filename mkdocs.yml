@@ -88,7 +88,9 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
+  - Getting started:
+      - getting-started.md
+      - "Connect YouTube (client_secret.json)": youtube-oauth.md
   - Use cases:
       - use-cases/index.md
       - Backlog of best posts: use-cases/catalog-backlog.md
@@ -106,6 +108,8 @@ nav:
   - Reference:
       - Configuration: configuration.md
       - CLI: cli.md
+      - Privacy policy: privacy.md
+      - Terms of service: terms.md
       - API:
           - api/index.md
           - Pipeline and core: api/core.md
