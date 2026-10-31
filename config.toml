@@ -11,7 +11,7 @@ phash_threshold = 10
 phash_frames = 6
 phone_name_match = "S23"
 phone_video_folders = ["Movies/Edits", "Movies/Instagram"]
-gemini_model = "gemini-2.5-flash"   # needs GEMINI_API_KEY in the environment
+gemini_model = "gemini-3.8-flash"   # needs GEMINI_API_KEY in the environment (2.5-flash retired for new users, 2026-10-31)
 whisper_model = "small"
 
 [sources]
