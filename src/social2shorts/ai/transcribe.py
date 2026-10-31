@@ -16,7 +16,7 @@ def load_model(size: str) -> Any:
 
     # CPU + int8 on purpose: device/compute_type "auto" segfaults ctranslate2 4.8.3 on CPU (word
     # timestamps) and picks a CUDA GPU whose cuBLAS 12 DLL may be missing. The YouTube quota caps
-    # uploads at a few per day, so CPU speed is enough. Switch to device="cuda" once CUDA libs exist.
+    # uploads at a few per day, so CPU speed is enough. Use device="cuda" once the CUDA libs exist.
     return WhisperModel(size, device="cpu", compute_type="int8")
 
 
