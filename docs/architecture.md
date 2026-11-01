@@ -232,10 +232,13 @@ Errors:
 - `AuthRefreshError` stops the run and records an alert (exit code 2).
 - `QuotaExceededError` and `ScheduleFull` stop the run with a reason. YouTube's daily quota
   (403) and the channel's daily upload limit (`uploadLimitExceeded`, 400) both raise
-  `QuotaExceededError`; no item is charged an attempt.
+  `QuotaExceededError`; no item is charged an attempt. The stop reason says which one it was:
+  the upload limit does not show in the API quota.
 - `LLMQuotaExceeded` (Gemini's per-day 429; the free tier allows 20 requests per model per
   day) stops the run too, rather than publish videos with template titles and uncorrected
-  subtitles. Other Gemini errors still fall back (template metadata, speech-model draft).
+  subtitles. Temporary Gemini errors (408, 500, 502, 503 "high demand", 504) are retried for
+  about a minute first; after that, and for any other Gemini error, the item falls back
+  (template metadata, speech-model draft).
 - A catalog post whose reference has no video stream (a TikTok photo slideshow comes down as
   audio) becomes `not_video` and is never retried.
 - Anything else is an item failure, with one exception: if **3 items in a row fail with the

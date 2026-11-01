@@ -89,6 +89,15 @@ def test_dry_run_renders_without_youtube(settings, deps):
     assert "salut" in srt.read_text(encoding="utf-8")  # saved for review
 
 
+def test_no_speech_removes_an_earlier_subtitle_file(settings, deps):
+    srt = Path(settings.work_dir) / "subtitles" / "A.srt"
+    srt.parent.mkdir(parents=True)
+    srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nold lyrics\n", encoding="utf-8")
+    deps.transcriber.words = []  # music only
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, dry_run=True))
+    assert r.rendered == ["A"] and not srt.exists()
+
+
 def test_subtitle_track_added_after_upload(settings, deps):
     settings.whisper_language = "ar"
     settings.youtube.caption_name = "Darija"
@@ -180,8 +189,15 @@ def test_max_uploads_per_day_cap(settings, deps):
 def test_youtube_quota_error_stops_and_exhausts_day(settings, deps):
     deps.platform.upload_error = QuotaExceededError("quotaExceeded")
     r = run_pipeline(settings, deps, CATALOG)
-    assert r.uploaded == [] and "quota" in r.stop_reason
+    assert r.uploaded == [] and "API quota" in r.stop_reason
     assert _store(settings).quota_used("2026-10-23")[0] == settings.youtube.daily_quota_units
+
+
+def test_upload_limit_stop_names_the_channel_limit(settings, deps):
+    deps.platform.upload_error = QuotaExceededError("x", frozenset({"uploadLimitExceeded"}))
+    r = run_pipeline(settings, deps, CATALOG)
+    assert r.uploaded == [] and "upload limit" in r.stop_reason
+    assert "API quota is not spent" in r.stop_reason
 
 
 def test_auth_failure_alerts_and_stops(settings, deps):

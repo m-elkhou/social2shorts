@@ -46,7 +46,19 @@ class AuthRefreshError(Exception):
 
 
 class QuotaExceededError(Exception):
-    """YouTube refused the call because today's API quota is spent."""
+    """YouTube refused the call: today's API quota or the channel's upload limit is spent.
+
+    ``reasons`` holds YouTube's reason codes, e.g. ``uploadLimitExceeded`` (the channel's own
+    limit, about 10 uploads a day, which the API quota does not show).
+    """
+
+    def __init__(self, message: str = "", reasons: frozenset[str] = frozenset()):
+        super().__init__(message)
+        self.reasons = reasons
+
+    @classmethod
+    def from_http(cls, exc: HttpError) -> QuotaExceededError:
+        return cls(str(exc), frozenset(_reasons(exc) & QUOTA_REASONS))
 
 
 # --------------------------------------------------------------------- OAuth
@@ -217,7 +229,7 @@ def run_resumable(
             failures = 0
         except Exception as exc:
             if is_quota_error(exc):
-                raise QuotaExceededError(str(exc)) from exc
+                raise QuotaExceededError.from_http(exc) from exc
             if not is_transient(exc) or failures >= max_retries:
                 raise
             failures += 1
@@ -317,7 +329,7 @@ class YouTubeClient:
             request.execute(num_retries=3)
         except HttpError as exc:
             if is_quota_error(exc):
-                raise QuotaExceededError(str(exc)) from exc
+                raise QuotaExceededError.from_http(exc) from exc
             raise
 
     def check_claims(self, video_ids: list[str]) -> list[Claim]:

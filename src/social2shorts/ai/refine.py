@@ -19,7 +19,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from social2shorts.ai.metadata import LLMQuotaExceeded, is_daily_quota_error
+from social2shorts.ai.metadata import LLMQuotaExceeded, gemini_client, is_daily_quota_error
 from social2shorts.montage.types import Word
 from social2shorts.ports import Transcriber
 
@@ -134,12 +134,11 @@ class GeminiAudioRefiner:
 
     def refine(self, path: Path, draft: Sequence[Word]) -> list[Word]:
         """Corrected words for ``path``, timed like ``draft``."""
-        from google import genai
         from google.genai import types
 
         # Keep a reference: the SDK closes its HTTP client as soon as the Client is collected,
         # so ``genai.Client().models.generate_content(...)`` fails with "client has been closed".
-        client = genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY
+        client = gemini_client()
         resp = client.models.generate_content(
             model=self.model,
             contents=[

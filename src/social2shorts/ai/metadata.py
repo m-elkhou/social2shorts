@@ -115,11 +115,31 @@ _STOPWORDS = frozenset(
 
 
 # ------------------------------------------------------------------ adapter
-@functools.cache
-def _genai_client() -> Any:
+# Not 429: the per-day quota must stop the run at once (per-minute 429s take the fallback).
+GEMINI_RETRY_STATUS = (408, 500, 502, 503, 504)
+
+
+def gemini_http_options() -> Any:
+    """Retry temporary errors (about 1 min in all): the SDK tries once by default, and a
+    "503 high demand" (2026-11-01) put a template title on a Short."""
+    from google.genai import types
+
+    retry = types.HttpRetryOptions(
+        attempts=4, initial_delay=10, max_delay=60, http_status_codes=list(GEMINI_RETRY_STATUS)
+    )
+    return types.HttpOptions(retry_options=retry)
+
+
+def gemini_client() -> Any:
+    """``genai.Client`` with :func:`gemini_http_options`; reads GEMINI_API_KEY / GOOGLE_API_KEY."""
     from google import genai
 
-    return genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY
+    return genai.Client(http_options=gemini_http_options())
+
+
+@functools.cache
+def _genai_client() -> Any:
+    return gemini_client()
 
 
 class LLMQuotaExceeded(Exception):
