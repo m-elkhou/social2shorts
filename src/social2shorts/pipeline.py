@@ -445,9 +445,10 @@ def _save_subtitles(run: Run, item: Item, words: list[Word]) -> str | None:
     Returns the SRT text, or None when there is no speech.
     """
     srt = build_srt(words)
-    if not srt:
-        return None
     path = _subtitles_path(run, item)
+    if not srt:
+        path.unlink(missing_ok=True)  # an earlier attempt's file is not this video's subtitles
+        return None
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(srt, encoding="utf-8")
     return srt
@@ -728,9 +729,12 @@ def run_pipeline(settings: Settings, deps: PipelineDeps, options: RunOptions) ->
         report.alert = AUTH_ALERT.format(exc)
         store.add_alert(report.alert)
         log.error(report.alert)
-    except QuotaExceededError:
+    except QuotaExceededError as exc:
         report.stop_reason = (
-            "YouTube reports today's quota or upload limit is spent; continuing tomorrow"
+            "YouTube refused the upload: the channel's daily upload limit is reached "
+            "(uploadLimitExceeded; the API quota is not spent); continuing tomorrow"
+            if "uploadLimitExceeded" in exc.reasons
+            else "YouTube reports today's API quota is spent; continuing tomorrow"
         )
     except LLMQuotaExceeded as exc:
         report.stop_reason = f"{exc}; continuing when it resets (midnight Pacific time)"

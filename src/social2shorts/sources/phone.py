@@ -46,6 +46,15 @@ class PhoneDevice(Protocol):
     def copy(self, video: PhoneVideo, dest_dir: Path) -> Path: ...
 
 
+def item_size(item: Any) -> int | None:
+    """Byte size of a Shell item. Over MTP ``Size`` is 0 (seen on a Galaxy S23, 2026-11-01) but
+    the ``System.Size`` property holds the real size; None when neither is known."""
+    for size in (item.Size, item.ExtendedProperty("System.Size")):
+        if size:
+            return int(size)
+    return None
+
+
 def is_cached(video: PhoneVideo, dest_dir: Path) -> bool:
     """True if ``dest_dir`` already holds this video with the same size."""
     local = dest_dir / video.name
@@ -153,9 +162,7 @@ class MtpPhoneSource:
     def list_videos(self, folders: list[str]) -> list[PhoneVideo]:
         """Videos in ``folders`` with their size when the device reports it."""
         return [
-            PhoneVideo(it.Name, path, int(it.Size or 0) or None)
-            for path in folders
-            for it in self._items(path)
+            PhoneVideo(it.Name, path, item_size(it)) for path in folders for it in self._items(path)
         ]
 
     def copy(self, video: PhoneVideo, dest_dir: Path) -> Path:

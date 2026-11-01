@@ -37,8 +37,9 @@ if (-not (Test-Path (Join-Path $RepoRoot $Config))) {
 $LogDir = Join-Path $RepoRoot "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $RunArgs = "run --continuous --source $Source --privacy $Privacy -c `"$Config`""
-# cmd /c so the output (and any OAuth alert) lands in logs\social2shorts.log.
-$Command = "`"$Uv`" run social2shorts $RunArgs >> `"$LogDir\social2shorts.log`" 2>&1"
+# cmd /c so the output (and any OAuth alert) lands in logs\social2shorts.log. PYTHONUTF8: the
+# Windows code page (cp1252) cannot print emoji or Arabic captions and stops the run.
+$Command = "set PYTHONUTF8=1&& `"$Uv`" run social2shorts $RunArgs >> `"$LogDir\social2shorts.log`" 2>&1"
 
 $Action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $Command" -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(5) `

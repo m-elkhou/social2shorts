@@ -10,6 +10,7 @@ from social2shorts.ai.metadata import (
     MAX_HOOK,
     build_prompt,
     fallback_meta,
+    gemini_http_options,
     generate_metadata,
     humanize,
     sanitize_meta,
@@ -113,3 +114,9 @@ def test_transcriber_returns_words():
 
     WhisperTranscriber(model=Model(), vad=False).transcribe("x.mp4")
     assert seen["vad_filter"] is False  # Darija model: VAD cut quiet speech
+
+
+def test_gemini_retries_busy_server_but_not_spent_quota():
+    retry = gemini_http_options().retry_options
+    assert retry.attempts > 1 and 503 in retry.http_status_codes
+    assert 429 not in retry.http_status_codes  # a spent daily quota stops the run at once
