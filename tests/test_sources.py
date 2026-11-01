@@ -23,6 +23,7 @@ from social2shorts.sources.tiktok_instagram import (
     build_opts,
     discover_profile,
     download_reference,
+    download_video,
     parse_entry,
 )
 
@@ -77,6 +78,19 @@ def test_download_reference_paths(tmp_path):
     assert fallback == tmp_path / "r" / "42.mp4"
     with pytest.raises(DiscoveryError):
         download_reference("u", tmp_path, lambda *a, **k: [])
+
+
+def test_download_video_skips_the_watermarked_format(tmp_path):
+    out = tmp_path / "9.mp4"
+    out.write_bytes(b"v")
+
+    def fake(url, opts=None, download=False):
+        assert download and "format_id!=download" in opts["format"]
+        return [{"id": "9", "requested_downloads": [{"filepath": str(out)}]}]
+
+    assert download_video("u", tmp_path, fake) == out
+    with pytest.raises(DiscoveryError):  # yt-dlp reported a file that is not there
+        download_video("u", tmp_path / "v", lambda *a, **k: [{"id": "42"}])
 
 
 def test_build_opts_merges():

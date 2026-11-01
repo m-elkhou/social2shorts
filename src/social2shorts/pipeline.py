@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import json
 import logging
 import os
 from collections.abc import Callable, Iterator
@@ -39,7 +40,7 @@ from social2shorts.models import (
     Upload,
 )
 from social2shorts.montage.captions import build_srt
-from social2shorts.montage.types import MontageMode, Word
+from social2shorts.montage.types import MontageMode, MontageSettings, Word
 from social2shorts.phash import NoVideoStream
 from social2shorts.ports import (
     LLM,
@@ -210,6 +211,13 @@ class Run:
 
 
 # ------------------------------------------------------------------ strategies
+FIRST = (ItemStatus.rendered, ItemStatus.ready)  # a render waiting to upload, then approvals
+
+
+def _first(item: Item) -> int:
+    return FIRST.index(item.status) if item.status in FIRST else len(FIRST)
+
+
 def _eligible(item: Item, dry_run: bool) -> bool:
     if item.status is ItemStatus.failed:
         return item.attempts < MAX_ATTEMPTS
@@ -249,11 +257,12 @@ class CatalogStrategy:
             run.store.upsert_catalog(entry)
 
     def candidates(self, run: Run) -> list[Item]:
-        """Approved items first, then the curated shortlist (deduped across platforms)."""
+        """Rendered and approved items first, then the curated shortlist (deduped across
+        platforms)."""
         items = {i.key: i for i in run.store.items(self.kind) if _eligible(i, run.options.dry_run)}
-        ready = [i for i in items.values() if i.status is ItemStatus.ready]
+        ready = sorted((i for i in items.values() if i.status in FIRST), key=_first)
         s = run.settings
-        entries = [i.entry for i in items.values() if i.entry and i.status is not ItemStatus.ready]
+        entries = [i.entry for i in items.values() if i.entry and i.status not in FIRST]
         shortlist = curate(entries, s.min_duration_s, s.sources.prefer_platform)
         return ready + [items[e.source_id] for e in shortlist]
 
@@ -288,11 +297,27 @@ class CatalogStrategy:
             )  # fmt: skip
             return None
         if m.status is not ItemStatus.matched or m.original_path is None:
+            if s.sources.use_platform_copy:
+                return _platform_copy(run, item)
             run.store.set_status(item.key, ItemStatus.pending_original)
             run.report.pending.append(item.key)
             return None
         run.store.set_source(item.key, m.original_path)
         return Source(Path(m.original_path), MontageMode.polish)
+
+
+def _platform_copy(run: Run, item: Item) -> Source:
+    """The post's own watermark-free copy, kept under ``work/copies``: no phone original.
+
+    Raises:
+        DiscoveryError: If the download fails.
+    """
+    assert item.entry is not None
+    path = run.deps.catalog.download_video(item.entry.url, run.work_dir / "copies")
+    run.store.set_source(item.key, str(path))
+    log.info("No phone original for %s: rendering its %s copy", item.key,
+             item.entry.platform.value)  # fmt: skip
+    return Source(path, MontageMode.polish)
 
 
 def _ref_phashes(run: Run, item: Item) -> list[str]:
@@ -324,7 +349,7 @@ class RawStrategy:
     def candidates(self, run: Run) -> list[Item]:
         """Approved items first, then inbox order."""
         items = [i for i in run.store.items(self.kind) if _eligible(i, run.options.dry_run)]
-        return sorted(items, key=lambda i: i.status is not ItemStatus.ready)
+        return sorted(items, key=_first)
 
     def prepare(self, run: Run, item: Item) -> Source | None:
         """The inbox file, or None when it is too short (sent to review).
@@ -407,24 +432,32 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
     if run.store.is_content_uploaded(sha):
         _skip_duplicate(run, item, f"{source.path.name} was already uploaded for another post")
         return
-    words = run.deps.transcriber.transcribe(source.path)
-    meta = generate_metadata(
-        run.deps.llm,
-        item.caption,
-        " ".join(w.text for w in words),
-        key=item.key,
-        language=run.settings.youtube.language,
-        hint=_hint(item, source.path),
-    )
-    rendered = run.deps.renderer.render(
-        source.path,
-        run.work_dir / "renders" / f"{item.key}.mp4",
-        words=words,
-        settings=run.settings.montage.model_copy(update={"mode": source.mode}),
-        hook=meta.hook or None,
-    )
-    out = rendered.path
-    srt = _save_subtitles(run, item, rendered.words)
+    settings = run.settings.montage.model_copy(update={"mode": source.mode})
+    note = _render_note(run, item)
+    cached = _cached_render(note, sha, settings)
+    if cached:
+        out, meta, srt = cached
+        log.info("Reusing the render of %s made by an earlier run", item.key)
+    else:
+        words = run.deps.transcriber.transcribe(source.path)
+        meta = generate_metadata(
+            run.deps.llm,
+            item.caption,
+            " ".join(w.text for w in words),
+            key=item.key,
+            language=run.settings.youtube.language,
+            hint=_hint(item, source.path),
+        )
+        rendered = run.deps.renderer.render(
+            source.path,
+            run.work_dir / "renders" / f"{item.key}.mp4",
+            words=words,
+            settings=settings,
+            hook=meta.hook or None,
+        )
+        out = rendered.path
+        srt = _save_subtitles(run, item, rendered.words)
+        _write_note(note, out, sha, settings, meta, srt)
     if run.options.dry_run:
         run.store.set_status(item.key, ItemStatus.rendered)
         run.report.rendered.append(item.key)
@@ -434,6 +467,39 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
     _add_captions(run, item, upload, srt)
     _guard(run, [upload])
     _remove(out)
+    _remove(note)
+
+
+def _render_note(run: Run, item: Item) -> Path:
+    """What a kept render was made from, so a later run uploads it without redoing it."""
+    return run.work_dir / "renders" / f"{item.key}.json"
+
+
+def _write_note(
+    note: Path, out: Path, sha: str, settings: MontageSettings, meta: ShortMeta, srt: str | None
+) -> None:
+    data = {"video": str(out), "source_sha256": sha, "montage": settings.model_dump(mode="json"),
+            "meta": meta.model_dump(mode="json"), "srt": srt}  # fmt: skip
+    try:
+        note.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:  # only an optimisation: the next run renders again
+        log.info("Could not keep the render note %s (%s)", note, exc)
+
+
+def _cached_render(
+    note: Path, sha: str, settings: MontageSettings
+) -> tuple[Path, ShortMeta, str | None] | None:
+    """The kept render, its metadata and subtitles, if made from this source with these
+    montage settings; None otherwise."""
+    try:
+        data = json.loads(note.read_text(encoding="utf-8"))
+        out = Path(data["video"])
+        if (data["source_sha256"] != sha or data["montage"] != settings.model_dump(mode="json")
+                or not out.is_file()):  # fmt: skip
+            return None
+        return out, ShortMeta.model_validate(data["meta"]), data["srt"] or None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def _subtitles_path(run: Run, item: Item) -> Path:

@@ -106,11 +106,17 @@ prepared:
 
 | Strategy | Kind | refresh | candidates | prepare returns |
 |---|---|---|---|---|
-| `CatalogStrategy` | `catalog` | yt-dlp discovery | approved first, then the curated shortlist | the matched phone original, mode `polish` (after the audio gate and matching) |
-| `RawStrategy` | `raw` | inbox scan | approved first, then inbox order | the inbox file: mode `highlight` if longer than `[montage] target_duration_s`, else `polish`. Clips under `min_duration_s` go to review. |
+| `CatalogStrategy` | `catalog` | yt-dlp discovery | renders waiting to upload, approved items, then the curated shortlist | the matched phone original, mode `polish` (after the audio gate and matching); with `[sources] use_platform_copy`, the post's own watermark-free copy (kept in `work/copies`) when no original matches |
+| `RawStrategy` | `raw` | inbox scan | renders waiting to upload, approved items, then inbox order | the inbox file: mode `highlight` if longer than `[montage] target_duration_s`, else `polish`. Clips under `min_duration_s` go to review. |
 
 `prepare` returns a `Source(path, mode)`, or `None` after routing the item to review or
 `pending_original`.
+
+Each render is kept with a note (`work/renders/<key>.json`: source hash, montage settings,
+metadata, subtitles) until its upload succeeds. A later run whose source and montage settings
+are unchanged uploads that render without transcribing, calling Gemini or rendering again. So
+a `--dry-run` prepares videos ahead of the upload window, and a render whose upload YouTube
+refused is not lost.
 
 ## Item lifecycle
 

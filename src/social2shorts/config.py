@@ -24,6 +24,9 @@ class SourcesSettings(BaseModel):
     instagram_cookies: str | None = None
     inbox_dir: str = "inbox"
     prefer_platform: Platform = Platform.tiktok  # kept when a post exists on both platforms
+    # A post with no phone original is rendered from the platform's own watermark-free copy
+    # (TikTok: 576x1024 at best) instead of waiting for the original.
+    use_platform_copy: bool = False
 
 
 class YouTubeSettings(BaseModel):

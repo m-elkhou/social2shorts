@@ -20,6 +20,8 @@ class CatalogSource(Protocol):
 
     def download_reference(self, url: str, dest_dir: Path) -> Path: ...
 
+    def download_video(self, url: str, dest_dir: Path) -> Path: ...
+
 
 class OriginalsSource(Protocol):
     """Makes the phone originals available as local files."""
