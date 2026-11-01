@@ -14,6 +14,7 @@ from social2shorts.sources.phone import (
     PhoneNotFound,
     PhoneOriginals,
     PhoneVideo,
+    item_size,
     sync_originals,
 )
 from social2shorts.sources.tiktok_instagram import (
@@ -144,3 +145,17 @@ def test_scan_inbox_dedupes_and_caches_hash(tmp_path, monkeypatch):
     monkeypatch.setattr("social2shorts.media.sha256_file", boom)
     assert len(scan_inbox(inbox, store, now=later)) == 2
     assert scan_inbox(tmp_path / "missing", store) == []
+
+
+class ShellItem:
+    def __init__(self, size, system_size):
+        self.Size, self.system_size = size, system_size
+
+    def ExtendedProperty(self, name):  # noqa: N802 - Shell COM name
+        return self.system_size if name == "System.Size" else None
+
+
+def test_item_size_reads_system_size_when_mtp_reports_zero():
+    assert item_size(ShellItem(0, 51871200)) == 51871200  # MTP: Size is 0
+    assert item_size(ShellItem(1234, None)) == 1234
+    assert item_size(ShellItem(0, None)) is None

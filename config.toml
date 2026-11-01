@@ -34,7 +34,10 @@ token_path = "secrets/token.json"
 category_id = "2"               # Autos & Vehicles
 default_privacy = "unlisted"    # public | unlisted | private | scheduled
 daily_quota_units = 10000
-upload_cost_units = 1600
+upload_cost_units = 1           # videos.insert has its own bucket (100 calls/day) since 2026-06:
+                                # on 2026-10-31, 10 uploads + 9 subtitle tracks fit in 10,000 units
+                                # with no quotaExceeded (the channel's own limit, about 10 uploads a
+                                # day, answers uploadLimitExceeded and the run stops cleanly)
 max_uploads_per_day = 100       # per-project videos.insert cap (whichever limit hits first)
 made_for_kids = false
 contains_synthetic_media = false  # set true if the montage adds realistic AI-generated content
