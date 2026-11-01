@@ -1,8 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fakes import FakeLLM, GeminiDailyQuota, entry, settled
+from fakes import NOW, FakeLLM, GeminiDailyQuota, entry, settled
 
 from social2shorts import operations
 from social2shorts.db import Store
@@ -198,6 +198,25 @@ def test_upload_limit_stop_names_the_channel_limit(settings, deps):
     r = run_pipeline(settings, deps, CATALOG)
     assert r.uploaded == [] and "upload limit" in r.stop_reason
     assert "API quota is not spent" in r.stop_reason
+
+
+def test_upload_limit_waits_for_its_window_not_the_quota_day(settings, deps):
+    deps.platform.upload_error = QuotaExceededError("x", frozenset({"uploadLimitExceeded"}))
+    run_pipeline(settings, deps, CATALOG)
+    store = _store(settings)
+    assert store.upload_limit_refused_at() == NOW
+    assert store.quota_used("2026-10-23")[0] < settings.youtube.daily_quota_units
+    s = operations.summary(settings, store, NOW)
+    assert s.upload_limit_until == NOW + timedelta(hours=24)
+
+    deps.platform.upload_error = None
+    deps.renderer.calls.clear()
+    r = run_pipeline(settings, deps, CATALOG)  # still inside the window: no render, no Gemini
+    assert r.uploaded == [] and deps.renderer.calls == [] and "upload limit" in r.stop_reason
+
+    deps.clock = lambda: NOW + timedelta(hours=24, minutes=1)
+    r = run_pipeline(settings, deps, CATALOG)
+    assert len(r.uploaded) == 1
 
 
 def test_auth_failure_alerts_and_stops(settings, deps):

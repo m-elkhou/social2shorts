@@ -7,12 +7,13 @@ Two limits apply and whichever is hit first wins: the units budget (``videos.ins
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from social2shorts.db import Store
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
+UPLOAD_WINDOW = timedelta(hours=24)
 
 
 def quota_day(now: datetime) -> str:
@@ -67,3 +68,18 @@ class QuotaBudget:
     def exhaust(self) -> None:
         """Mark today as fully spent (YouTube said quotaExceeded before our count did)."""
         self.spend(self.remaining())
+
+
+def upload_limit_until(store: Store) -> datetime | None:
+    """When the channel may upload again after YouTube's ``uploadLimitExceeded``, or None.
+
+    That limit (about 10 uploads) counts the uploads of the last 24 hours, not a Pacific day
+    (refused again 4 and 8.5 hours after the 2026-10-31 uploads, across a quota reset). After a
+    refusal, wait until every upload of the 24 hours before it is 24 hours old: the next run
+    then gets the whole allowance, not one slot and another refusal.
+    """
+    refused = store.upload_limit_refused_at()
+    if refused is None:
+        return None
+    recent = [t for t in store.upload_times() if refused - UPLOAD_WINDOW < t <= refused]
+    return max(recent, default=refused) + UPLOAD_WINDOW

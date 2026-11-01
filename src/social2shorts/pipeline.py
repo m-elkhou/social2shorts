@@ -51,12 +51,13 @@ from social2shorts.ports import (
     VideoPlatform,
 )
 from social2shorts.publish.contentid import BATCH
-from social2shorts.publish.quota import QuotaBudget
+from social2shorts.publish.quota import QuotaBudget, upload_limit_until
 from social2shorts.publish.scheduler import ScheduleFull, next_slot
 from social2shorts.publish.youtube import (
     COST_CAPTION,
     COST_LIST,
     COST_UPDATE,
+    UPLOAD_LIMIT,
     AuthRefreshError,
     QuotaExceededError,
     YouTubeClient,
@@ -504,7 +505,9 @@ def _upload(run: Run, item: Item, video: Path, meta: ShortMeta, sha: str) -> Upl
         result = run.deps.platform.upload(video, meta, privacy=privacy, publish_at=publish_at)
     except Exception as exc:  # the API said no (Ctrl-C keeps 'uploading': a human checks)
         run.store.set_status(item.key, item.status)
-        if isinstance(exc, QuotaExceededError):
+        if isinstance(exc, QuotaExceededError) and UPLOAD_LIMIT in exc.reasons:
+            run.store.record_upload_limit(run.deps.clock())  # the API quota itself is fine
+        elif isinstance(exc, QuotaExceededError):
             run.budget.exhaust()
         elif not isinstance(exc, AuthRefreshError):
             run.budget.spend(cost, uploads=1)  # one conservative charge per failed insert
@@ -664,9 +667,17 @@ def _queue(run: Run, kinds: list[SourceKind]) -> Iterator[tuple[SourceStrategy, 
 
 
 def _quota_stop(run: Run) -> str | None:
+    if run.options.dry_run:
+        return None
+    until = upload_limit_until(run.store)
+    if until is not None and run.deps.clock() < until:
+        return (
+            f"the channel's upload limit ({UPLOAD_LIMIT}) still holds: the next upload fits "
+            f"after {until:%Y-%m-%d %H:%M} UTC, when the last uploads are 24 hours old"
+        )
     budget, yt = run.budget, run.settings.youtube
     cost = upload_units(yt.upload_cost_units, yt.upload_captions)
-    if run.options.dry_run or budget.uploads_left(cost) > 0:
+    if budget.uploads_left(cost) > 0:
         return None
     return (
         f"daily YouTube quota spent ({budget.used()}/{budget.daily_units} units, "
@@ -731,9 +742,9 @@ def run_pipeline(settings: Settings, deps: PipelineDeps, options: RunOptions) ->
         log.error(report.alert)
     except QuotaExceededError as exc:
         report.stop_reason = (
-            "YouTube refused the upload: the channel's daily upload limit is reached "
-            "(uploadLimitExceeded; the API quota is not spent); continuing tomorrow"
-            if "uploadLimitExceeded" in exc.reasons
+            f"YouTube refused the upload: the channel's upload limit is reached ({UPLOAD_LIMIT}; "
+            "the API quota is not spent); runs wait until the last uploads are 24 hours old"
+            if UPLOAD_LIMIT in exc.reasons
             else "YouTube reports today's API quota is spent; continuing tomorrow"
         )
     except LLMQuotaExceeded as exc:

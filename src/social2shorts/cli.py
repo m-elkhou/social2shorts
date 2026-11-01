@@ -194,7 +194,10 @@ def _print_report(report: RunReport, dry_run: bool) -> None:
     for name, items in buckets.items():
         if items:
             table.add_row(name, str(len(items)), ", ".join(items))
-    console.print(table if table.row_count else "Nothing to do: no new videos to process.")
+    if table.row_count:
+        console.print(table)
+    elif not report.stop_reason:  # stopped before the first video: the reason says why
+        console.print("Nothing to do: no new videos to process.")
     if report.stop_reason:
         console.print(f"[yellow]Stopped early: {report.stop_reason}.[/yellow]")
     if report.review or report.claimed:
@@ -296,6 +299,11 @@ def status(config: ConfigOpt = DEFAULT_CONFIG) -> None:
         f"room for {s.uploads_left_today} more upload(s)."
     )
     tz = settings.schedule.timezone
+    if s.upload_limit_until:
+        console.print(
+            f"Channel upload limit (uploadLimitExceeded): next upload after "
+            f"{_local(s.upload_limit_until, tz)} ({tz})."
+        )
     if s.scheduled:
         console.print(f"Next publications ({tz}):")
         for when, key in s.scheduled[:5]:

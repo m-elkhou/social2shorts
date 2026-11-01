@@ -307,7 +307,8 @@ documentation, so treat the question as **open until you test it**:
 | `invalid_grant: Token has been expired or revoked` | The app is still in *Testing* (7-day limit), you revoked access, or the token was unused for 6 months. | Publish the app (step 5), delete `secrets/token.json`, run `auth` again. |
 | `Access blocked` or `invalid_scope` | The API is not enabled, or the scopes are missing. | Redo steps 2 and 4. |
 | The video went to the wrong channel | You picked the wrong Brand Account channel in step 8. | Delete `secrets/token.json`, run `auth`, and pick the right channel. |
-| `quotaExceeded` or `uploadLimitExceeded` | A daily cap was reached. | Wait for midnight Pacific time. See the quota section above. |
+| `quotaExceeded` | The API quota of the day is spent. | Wait for midnight Pacific time. See the quota section above. |
+| `uploadLimitExceeded` | The channel uploaded its limit (about 10 videos) in the last 24 hours. This is not the API quota. | Nothing to do: runs wait until the last uploads are 24 hours old (`status` shows when). |
 | `auth` says the client file is missing | Wrong folder or file name. | The path must be exactly `secrets/client_secret.json`, relative to the folder where you run the command. |
 
 Google's exact error wording changes now and then. The causes above stay the same.
