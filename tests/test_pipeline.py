@@ -211,9 +211,12 @@ def test_upload_limit_waits_for_its_window_not_the_quota_day(settings, deps):
 
     deps.platform.upload_error = None
     deps.renderer.calls.clear()
+    discover = deps.catalog.discover
+    deps.catalog.discover = lambda: pytest.fail("profiles scraped while uploads are blocked")
     r = run_pipeline(settings, deps, CATALOG)  # still inside the window: no render, no Gemini
     assert r.uploaded == [] and deps.renderer.calls == [] and "upload limit" in r.stop_reason
 
+    deps.catalog.discover = discover
     deps.clock = lambda: NOW + timedelta(hours=24, minutes=1)
     r = run_pipeline(settings, deps, CATALOG)
     assert len(r.uploaded) == 1

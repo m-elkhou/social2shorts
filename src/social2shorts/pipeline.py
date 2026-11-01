@@ -688,6 +688,9 @@ def _quota_stop(run: Run) -> str | None:
 
 def _process_queue(run: Run, kinds: list[SourceKind]) -> None:
     report, streak = run.report, FailureStreak(run)
+    if stop := _quota_stop(run):  # before refreshing the sources: no scraping while blocked
+        report.stop_reason = stop
+        return
     for strategy, item in _queue(run, kinds):
         if run.options.limit is not None and run.done() >= run.options.limit:
             break
