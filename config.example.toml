@@ -26,6 +26,7 @@ instagram_profile_url = ""      # e.g. "https://www.instagram.com/motoride.mh/"
 # instagram_cookies = "cookies.txt"  # exported exported from a logged-in browser
 inbox_dir = "inbox"             # drop raw, never-published videos here
 prefer_platform = "tiktok"      # which copy to keep when a post is on both platforms
+use_platform_copy = false       # no phone original: render the post's own copy (576p on TikTok)
 
 [youtube]
 client_secrets = "secrets/client_secret.json"

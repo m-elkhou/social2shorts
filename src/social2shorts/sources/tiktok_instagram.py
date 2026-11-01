@@ -111,6 +111,34 @@ def download_reference(
     return Path(path) if path else dest_dir / f"{info['id']}.{info.get('ext', 'mp4')}"
 
 
+def download_video(
+    url: str, dest_dir: Path, ytdlp: Ytdlp = run_ytdlp, cookies: str | None = None
+) -> Path:
+    """Download the best watermark-free copy of a post (rendered when no original exists).
+
+    Raises:
+        DiscoveryError: If the download fails.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    opts = {
+        # TikTok's "download" format carries the watermark; every other one is clean.
+        "format": "b[format_id!=download][vcodec!=none][acodec!=none]/b[format_id!=download]",
+        "format_sort": ["res", "br"],
+        "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
+    }
+    if cookies:
+        opts["cookiefile"] = cookies
+    infos = ytdlp(url, opts, download=True)
+    if not infos:
+        raise DiscoveryError(f"download failed for {url}")
+    info = infos[0]
+    path = (info.get("requested_downloads") or [{}])[0].get("filepath") or info.get("filepath")
+    path = Path(path) if path else dest_dir / f"{info['id']}.{info.get('ext', 'mp4')}"
+    if not path.is_file():
+        raise DiscoveryError(f"download of {url} produced no file")
+    return path
+
+
 class SocialCatalog:
     """``CatalogSource`` adapter over the configured TikTok and Instagram profiles."""
 
@@ -144,3 +172,8 @@ class SocialCatalog:
         """See :func:`download_reference`."""
         cookies = self.cookies if "instagram.com" in url else None
         return download_reference(url, dest_dir, self.ytdlp, cookies)
+
+    def download_video(self, url: str, dest_dir: Path) -> Path:
+        """See :func:`download_video`."""
+        cookies = self.cookies if "instagram.com" in url else None
+        return download_video(url, dest_dir, self.ytdlp, cookies)

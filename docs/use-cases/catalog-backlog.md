@@ -78,7 +78,9 @@ Catalog posts are already edited. The montage engine keeps your cut and only:
 ## Tips
 
 - Plug the phone in before the run, or run `ingest` first. Posts without an original stay
-  `pending_original` and are retried every run.
+  `pending_original` and are retried every run, unless `[sources] use_platform_copy = true`:
+  then they are rendered from the post's own watermark-free copy (TikTok: 576x1024 at best,
+  so softer than a phone original).
 - Licensed tracks never upload on their own. See [Review queue](review-queue.md).
 - Instagram usually needs a cookies file exported from a logged-in browser:
   `[sources] instagram_cookies = "cookies.txt"`.

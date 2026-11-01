@@ -5,7 +5,7 @@ youtube_handle = "@motoride-mh"
 originals_dir = "originals"     # local cache of the phone originals
 work_dir = "work"               # references and renders (temporary)
 db_path = "social2shorts.sqlite"
-min_duration_s = 12.0           # skip micro-clips
+min_duration_s = 5.0            # skip micro-clips (owner, 2026-11-01: 7-11 s posts are welcome)
 duration_tol_s = 1.0            # matching: post vs original duration tolerance
 phash_threshold = 10
 phash_frames = 6
@@ -27,6 +27,7 @@ instagram_profile_url = ""      # e.g. "https://www.instagram.com/motoride.mh/"
 # instagram_cookies = "cookies.txt"  # exported exported from a logged-in browser
 inbox_dir = "inbox"             # drop raw, never-published videos here
 prefer_platform = "tiktok"      # which copy to keep when a post is on both platforms
+use_platform_copy = true        # no phone original: render the post's own copy (576p on TikTok)
 
 [youtube]
 client_secrets = "secrets/client_secret.json"
@@ -50,8 +51,8 @@ caption_name = "Darija"
 
 [schedule]                      # used with --privacy scheduled
 timezone = "Africa/Casablanca"
-publish_slots = ["12:00", "18:00"]
-max_per_day = 2
+publish_slots = ["08:00", "09:30", "11:00", "12:30", "14:00", "15:30", "17:00", "18:30", "20:00", "21:30"]
+max_per_day = 10                # owner, 2026-11-01: publish as fast as the channel uploads
 min_lead_minutes = 60
 
 [montage]                       # see social2shorts.montage.types.MontageSettings

@@ -89,6 +89,54 @@ def test_dry_run_renders_without_youtube(settings, deps):
     assert "salut" in srt.read_text(encoding="utf-8")  # saved for review
 
 
+def test_a_dry_run_render_is_uploaded_later_without_redoing_it(settings, deps):
+    r = run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, dry_run=True))
+    assert r.rendered == ["A"] and len(deps.renderer.calls) == 1
+    deps.llm.error = RuntimeError("Gemini must not be called again")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["A"] and len(deps.renderer.calls) == 1
+    assert deps.platform.uploads[0]["meta"].title == "Late ride by the sea"
+    assert not list((Path(settings.work_dir) / "renders").glob("A.*"))  # render + note removed
+
+
+def test_a_refused_upload_keeps_its_render_for_the_next_run(settings, deps):
+    deps.platform.upload_error = QuotaExceededError("x", frozenset({"uploadLimitExceeded"}))
+    run_pipeline(settings, deps, CATALOG)
+    deps.platform.upload_error = None
+    deps.clock = lambda: NOW + timedelta(hours=24, minutes=1)
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["A"] and len(deps.renderer.calls) == 1
+
+
+def test_a_render_is_redone_when_the_montage_settings_changed(settings, deps):
+    run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, dry_run=True))
+    settings.montage.target_duration_s += 5
+    run_pipeline(settings, deps, CATALOG)
+    assert len(deps.renderer.calls) == 2
+
+
+def test_rendered_items_upload_before_new_ones(settings, deps):
+    deps.catalog.entries.append(entry("D", 25.0, view_count=10**6))  # the best score
+    (Path(settings.originals_dir) / "D.mp4").write_bytes(b"original D")
+    deps.originals.paths.append(Path(settings.originals_dir) / "D.mp4")
+    deps.media.durations["D"], deps.media.hashes["D"] = 25.0, "0000ffff"
+    opts = RunOptions(source=SourceChoice.catalog, limit=1)
+    run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, limit=1, dry_run=True))
+    assert _store(settings).item("D").status is ItemStatus.rendered
+    deps.catalog.entries.append(entry("E", 25.0, view_count=10**7))  # even better, not rendered
+    assert [u.item_key for u in run_pipeline(settings, deps, opts).uploaded] == ["D"]
+
+
+def test_platform_copy_renders_posts_without_an_original(settings, deps):
+    settings.sources.use_platform_copy = True
+    r = run_pipeline(settings, deps, CATALOG)
+    assert sorted(u.item_key for u in r.uploaded) == ["A", "C"] and r.pending == []
+    assert deps.catalog.videos == ["http://x/C"]
+    [copy] = [c["src"] for c in deps.renderer.calls if c["src"].name == "C.mp4"]
+    assert copy.parent == Path(settings.work_dir) / "copies"
+    assert _store(settings).item("B").status is ItemStatus.review_audio  # music still reviewed
+
+
 def test_no_speech_removes_an_earlier_subtitle_file(settings, deps):
     srt = Path(settings.work_dir) / "subtitles" / "A.srt"
     srt.parent.mkdir(parents=True)

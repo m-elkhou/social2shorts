@@ -42,6 +42,7 @@ def entry(sid: str, dur: float = 20.0, track: str = "original sound", **kw) -> C
 class FakeCatalog:
     entries: list[CatalogEntry] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
+    videos: list[str] = field(default_factory=list)
 
     def discover(self) -> list[CatalogEntry]:
         return list(self.entries)
@@ -51,6 +52,13 @@ class FakeCatalog:
         dest_dir.mkdir(parents=True, exist_ok=True)
         path = dest_dir / f"ref-{url.rsplit('/', 1)[-1]}.mp4"
         path.write_bytes(b"ref")
+        return path
+
+    def download_video(self, url: str, dest_dir: Path) -> Path:
+        self.videos.append(url)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        path = dest_dir / f"{url.rsplit('/', 1)[-1]}.mp4"
+        path.write_bytes(f"copy of {url}".encode())
         return path
 
 
