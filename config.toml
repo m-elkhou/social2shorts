@@ -57,6 +57,7 @@ min_lead_minutes = 60
 
 [montage]                       # see social2shorts.montage.types.MontageSettings
 target_duration_s = 35
+min_duration_s = 5               # shortest Short the montage accepts (owner, 2026-11-01: micro-clips welcome)
 captions = "none"              # no burned-in subtitles: they go to YouTube as a subtitle track
 width = 1440                    # 1440x2560: phone originals are QHD, and YouTube encodes
 height = 2560                   # 1440p uploads at a higher quality than 1080p ones
