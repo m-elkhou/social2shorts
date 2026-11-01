@@ -11,7 +11,7 @@ from social2shorts.config import Settings
 from social2shorts.db import Store
 from social2shorts.models import ItemStatus, MatchResult, Upload
 from social2shorts.ports import VideoPlatform
-from social2shorts.publish.quota import QuotaBudget
+from social2shorts.publish.quota import QuotaBudget, upload_limit_until
 from social2shorts.publish.scheduler import upcoming_slots
 from social2shorts.publish.youtube import COST_UPDATE, AuthRefreshError, upload_units
 
@@ -163,6 +163,7 @@ class Summary:
     quota_used: int
     quota_daily: int
     uploads_left_today: int
+    upload_limit_until: datetime | None  # set while the channel's upload limit holds
     scheduled: list[tuple[datetime, str]]
     next_slots: list[datetime]
     reviews: int
@@ -173,6 +174,7 @@ def summary(settings: Settings, store: Store, now: datetime, slots: int = 5) -> 
     """Counts, today's quota, upcoming publications and open alerts."""
     yt = settings.youtube
     budget = QuotaBudget(store, yt.daily_quota_units, lambda: now, yt.max_uploads_per_day)
+    limit_until = upload_limit_until(store)
     scheduled = sorted(
         (u.publish_at, u.item_key) for u in store.uploads() if u.publish_at and u.publish_at > now
     )
@@ -183,6 +185,7 @@ def summary(settings: Settings, store: Store, now: datetime, slots: int = 5) -> 
         uploads_left_today=budget.uploads_left(
             upload_units(yt.upload_cost_units, yt.upload_captions)
         ),
+        upload_limit_until=limit_until if limit_until and limit_until > now else None,
         scheduled=scheduled,
         next_slots=upcoming_slots(now, store.publish_times(), settings.schedule, slots),
         reviews=len(store.reviews()),

@@ -15,7 +15,7 @@ def _store(tmp_path) -> Store:
 
 def test_fresh_schema_and_idempotent_init(tmp_path):
     s = _store(tmp_path)
-    assert s.schema_version() == SCHEMA_VERSION == 3
+    assert s.schema_version() == SCHEMA_VERSION == 4
     s.init_schema()
     assert s.schema_version() == SCHEMA_VERSION
 

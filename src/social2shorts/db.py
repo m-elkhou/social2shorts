@@ -170,7 +170,17 @@ def _migrate_v3(c: sqlite3.Connection) -> None:
     _run_script(c, _V3_UPLOADS)
 
 
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migrate_v1, _migrate_v2, _migrate_v3]
+def _migrate_v4(c: sqlite3.Connection) -> None:
+    """Remember the channel's upload-limit refusals (a rolling 24-hour limit, not a quota day)."""
+    c.execute("CREATE TABLE upload_limit (refused_at TEXT NOT NULL)")
+
+
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
+    _migrate_v1,
+    _migrate_v2,
+    _migrate_v3,
+    _migrate_v4,
+]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -463,6 +473,24 @@ class Store:
                 "SELECT units, uploads FROM quota_usage WHERE day = ?", (day,)
             ).fetchone()
         return (int(row["units"]), int(row["uploads"])) if row else (0, 0)
+
+    def record_upload_limit(self, at: datetime) -> None:
+        """Remember YouTube's latest ``uploadLimitExceeded`` refusal (only the latest matters)."""
+        with self._tx() as c:
+            c.execute("DELETE FROM upload_limit")
+            c.execute("INSERT INTO upload_limit (refused_at) VALUES (?)", (_iso(at),))
+
+    def upload_limit_refused_at(self) -> datetime | None:
+        """When YouTube last refused an upload for the channel's limit, or None."""
+        with self._tx() as c:
+            row = c.execute("SELECT refused_at FROM upload_limit").fetchone()
+        return _dt(row["refused_at"]) if row else None
+
+    def upload_times(self) -> list[datetime]:
+        """When each recorded upload was made (UTC), oldest first."""
+        with self._tx() as c:
+            rows = c.execute("SELECT uploaded_at FROM uploads ORDER BY uploaded_at").fetchall()
+        return [t for r in rows if (t := _dt(r["uploaded_at"]))]
 
     # ------------------------------------------------------------------ caches
     def cached_original(self, path: str, size: int) -> tuple[float, list[str]] | None:

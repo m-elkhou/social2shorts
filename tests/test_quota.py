@@ -1,7 +1,8 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from social2shorts.db import Store
-from social2shorts.publish.quota import QuotaBudget, quota_day
+from social2shorts.models import Upload
+from social2shorts.publish.quota import QuotaBudget, quota_day, upload_limit_until
 
 
 def test_quota_day_resets_at_pacific_midnight():
@@ -24,3 +25,30 @@ def test_budget_units_and_upload_cap(tmp_path):
     assert budget.remaining() == 0 and budget.uploads_left(1600) == 0
     now[0] = datetime(2026, 10, 24, 12, tzinfo=UTC)
     assert budget.remaining() == 10_000
+
+
+def _uploaded(store: Store, key: str, at: datetime) -> None:
+    store.record_upload(Upload(youtube_id=f"y{key}", item_key=key, fingerprint=key,
+                               privacy="private", content_sha256=key, uploaded_at=at,
+                               quota_units=1))  # fmt: skip
+
+
+def test_upload_limit_waits_until_the_last_uploads_are_a_day_old(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    store.init_schema()
+    assert upload_limit_until(store) is None
+    last = datetime(2026, 10, 31, 22, 45, tzinfo=UTC)
+    _uploaded(store, "old", datetime(2026, 10, 29, 12, tzinfo=UTC))  # out of the window
+    _uploaded(store, "first", datetime(2026, 10, 31, 22, 14, tzinfo=UTC))
+    _uploaded(store, "last", last)
+    store.record_upload_limit(datetime(2026, 11, 1, 7, 15, tzinfo=UTC))
+    assert upload_limit_until(store) == last + timedelta(hours=24)
+
+
+def test_upload_limit_without_recent_uploads_waits_a_day(tmp_path):
+    store = Store(tmp_path / "db.sqlite")
+    store.init_schema()
+    refused = datetime(2026, 11, 1, 7, 15, tzinfo=UTC)
+    store.record_upload_limit(refused)
+    assert store.upload_limit_refused_at() == refused
+    assert upload_limit_until(store) == refused + timedelta(hours=24)

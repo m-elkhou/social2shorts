@@ -231,9 +231,14 @@ Errors:
 
 - `AuthRefreshError` stops the run and records an alert (exit code 2).
 - `QuotaExceededError` and `ScheduleFull` stop the run with a reason. YouTube's daily quota
-  (403) and the channel's daily upload limit (`uploadLimitExceeded`, 400) both raise
+  (403) and the channel's upload limit (`uploadLimitExceeded`, 400) both raise
   `QuotaExceededError`; no item is charged an attempt. The stop reason says which one it was:
   the upload limit does not show in the API quota.
+- The upload limit (about 10 uploads) counts the last 24 hours, not a Pacific day: on
+  2026-11-01 it still refused uploads 4 and 8.5 hours after the previous batch, across a quota
+  reset. So a refusal does not mark the quota day spent; it is stored in `upload_limit`, and
+  later runs stop before any render or Gemini call until every upload of the 24 hours before
+  the refusal is 24 hours old (`upload_limit_until`). `status` shows when that is.
 - `LLMQuotaExceeded` (Gemini's per-day 429; the free tier allows 20 requests per model per
   day) stops the run too, rather than publish videos with template titles and uncorrected
   subtitles. Temporary Gemini errors (408, 500, 502, 503 "high demand", 504) are retried for
@@ -353,6 +358,7 @@ erDiagram
 | `review_queue` | One row per item waiting for a decision (latest reason wins). |
 | `uploads` | The anti-duplicate ledger. Checked by item key, by source-file sha256, and by caption fingerprint for pre-v3 rows. |
 | `quota_usage` | Units and `videos.insert` calls per Pacific day. |
+| `upload_limit` | When YouTube last refused an upload with `uploadLimitExceeded` (one row). |
 | `originals`, `ref_phashes`, `file_hashes` | Caches: original fingerprints, reference pHashes, sha256 of source files (by path, size and mtime). |
 | `alerts` | Operator alerts shown by `status` until `auth` resolves them. |
 
