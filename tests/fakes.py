@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from social2shorts.models import (
+    AudioLevel,
     CatalogEntry,
     Claim,
     Platform,
@@ -77,12 +78,16 @@ class FakeMedia:
     durations: dict[str, float] = field(default_factory=dict)
     hashes: dict[str, str] = field(default_factory=dict)
     default_duration: float = 60.0
+    levels: dict[str, AudioLevel] = field(default_factory=dict)  # by file stem; default audible
 
     def duration(self, path: Path) -> float:
         return self.durations.get(path.stem, self.default_duration)
 
     def phashes(self, path: Path, n_frames: int) -> list[str]:
         return [self.hashes.get(path.stem.removeprefix("ref-"), "0f0f0f0f")]
+
+    def audio_level(self, path: Path) -> AudioLevel:
+        return self.levels.get(path.stem, AudioLevel(has_audio=True, mean_db=-18.0, max_db=-3.0))
 
 
 @dataclass
@@ -106,8 +111,12 @@ class GeminiDailyQuota(Exception):
 class FakeLLM:
     reply: str = '{"title": "Late ride by the sea", "description": "d", "tags": ["sea"], "hook": "Wait for the turn"}'  # noqa: E501
     error: Exception | None = None
+    prompts: list[str] = field(default_factory=list)
+    images: list[tuple[bytes, ...]] = field(default_factory=list)
 
-    def complete_json(self, prompt: str) -> str:
+    def complete_json(self, prompt: str, images=()) -> str:
+        self.prompts.append(prompt)
+        self.images.append(tuple(images))
         if self.error:
             raise self.error
         return self.reply

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from fakes import GeminiDailyQuota
 
-from social2shorts.ai.metadata import LLMQuotaExceeded
+from social2shorts.ai.metadata import LLMQuotaExceeded, LLMUnavailable
 from social2shorts.ai.refine import RefiningTranscriber, build_prompt, parse_refined
 from social2shorts.montage.types import Word
 
@@ -70,9 +70,21 @@ def test_refining_transcriber_returns_refined_words():
     assert RefiningTranscriber(Base(DRAFT), Refiner(fixed)).transcribe(Path("v.mp4")) == fixed
 
 
-def test_refining_transcriber_falls_back_to_draft_on_error():
-    out = RefiningTranscriber(Base(DRAFT), Refiner(error=RuntimeError("429"))).transcribe(Path("v"))
-    assert out == DRAFT
+def test_an_unavailable_model_never_publishes_the_raw_draft():
+    refiner = Refiner(error=RuntimeError("503 UNAVAILABLE"))
+    with pytest.raises(LLMUnavailable):
+        RefiningTranscriber(Base(DRAFT), refiner).transcribe(Path("v"))
+
+
+def test_an_unusable_reply_gives_no_subtitles_not_the_draft():
+    refiner = Refiner(error=ValueError("refined transcript has no usable segment"))
+    assert RefiningTranscriber(Base(DRAFT), refiner).transcribe(Path("v")) == []
+
+
+def test_prompt_asks_for_moroccan_darija_not_standard_arabic():
+    p = build_prompt(DRAFT)
+    assert 'never "correct" them toward Modern Standard Arabic' in p
+    assert "ديال" in p and "بزاف" in p and "song" in p
 
 
 @pytest.mark.parametrize(("key", "model", "refined"), [("k", "m", True), ("k", "", False),
@@ -109,7 +121,25 @@ def test_refining_transcriber_stops_on_spent_daily_quota():
         RefiningTranscriber(Base(DRAFT), Refiner(error=GeminiDailyQuota())).transcribe(Path("v"))
 
 
-def test_refining_transcriber_falls_back_on_per_minute_limit():
+def test_refining_transcriber_waits_on_per_minute_limit():
     minute = RuntimeError("429 RESOURCE_EXHAUSTED GenerateRequestsPerMinutePerProjectPerModel")
     minute.code = 429
-    assert RefiningTranscriber(Base(DRAFT), Refiner(error=minute)).transcribe(Path("v")) == DRAFT
+    with pytest.raises(LLMUnavailable):
+        RefiningTranscriber(Base(DRAFT), Refiner(error=minute)).transcribe(Path("v"))
+
+
+@pytest.mark.parametrize("voice", ["standard_arabic", "other_arabic_dialect", "song_or_music",
+                                   "no_speech"])  # fmt: skip
+def test_a_voice_that_is_not_darija_or_french_gets_no_subtitles(voice):
+    raw = json.dumps({"voice": voice, "segments": [{"first": 0, "last": 2, "text": "كلام"}]})
+    assert parse_refined(raw, DRAFT) == []  # "Darija" tracks of Modern Standard Arabic: refused
+
+
+@pytest.mark.parametrize("voice", ["moroccan_darija", "french_or_english"])
+def test_darija_and_french_voices_are_subtitled(voice):
+    raw = json.dumps({"voice": voice, "segments": [{"first": 0, "last": 2, "text": "salam"}]})
+    assert [w.text for w in parse_refined(raw, DRAFT)] == ["salam"]
+
+
+def test_prompt_asks_what_the_voice_is():
+    assert "standard_arabic" in build_prompt(DRAFT) and "song_or_music" in build_prompt(DRAFT)

@@ -5,11 +5,19 @@ Adapters live in ``sources/``, ``ai/`` and ``publish/``; tests plug in fakes.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from social2shorts.models import CatalogEntry, Claim, Rendered, ShortMeta, UploadResult
+from social2shorts.models import (
+    AudioLevel,
+    CatalogEntry,
+    Claim,
+    Rendered,
+    ShortMeta,
+    UploadResult,
+)
 from social2shorts.montage.types import MontageSettings, Word
 
 
@@ -36,6 +44,8 @@ class MediaProbe(Protocol):
 
     def phashes(self, path: Path, n_frames: int) -> list[str]: ...
 
+    def audio_level(self, path: Path) -> AudioLevel: ...
+
 
 class Transcriber(Protocol):
     """Speech-to-text with word timings."""
@@ -44,9 +54,9 @@ class Transcriber(Protocol):
 
 
 class LLM(Protocol):
-    """Text model that answers a prompt with a JSON string."""
+    """Model that answers a prompt (and optional JPEG frames of the video) with a JSON string."""
 
-    def complete_json(self, prompt: str) -> str: ...
+    def complete_json(self, prompt: str, images: Sequence[bytes] = ()) -> str: ...
 
 
 class Renderer(Protocol):

@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     phone_name_match: str = ""
     phone_video_folders: list[str] = Field(default_factory=list)
     gemini_model: str = "gemini-2.5-flash"
+    gemini_fallback_models: list[str] = []  # tried in order when gemini_model's day is spent
+    transcript_refine_fallback_models: list[str] = []  # same, for transcript_refine_model
     whisper_model: str = "small"  # size name, or the folder of a converted model
     whisper_language: str | None = None  # speech language; None: [youtube] language, else detect
     whisper_vad: bool = True  # skip silence before transcribing (cuts quiet speech on some models)

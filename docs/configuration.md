@@ -41,10 +41,12 @@ Older flat config files are upgraded on load: top-level `tiktok_profile_url`,
 | `phone_name_match` | str | `""` | Part of the phone's name in *This PC* (Windows MTP). |
 | `phone_video_folders` | list[str] | `[]` | Folders on the phone to copy from, e.g. `["Movies/Edits"]`. Empty disables phone sync. |
 | `gemini_model` | str | `gemini-2.5-flash` | Model for metadata. Needs `GEMINI_API_KEY`. |
+| `transcript_refine_fallback_models` | list | `[]` | Same fallback for the transcript correction (`transcript_refine_model`). |
+| `gemini_fallback_models` | list | `[]` | Models tried in order when `gemini_model` has spent its daily quota (free tier: 20 requests per model) or stays overloaded (503). |
 | `whisper_model` | str | `small` | faster-whisper model size (`tiny`, `base`, `small`, `medium`, `large-v3`...) or the folder of a converted model, e.g. the [Darija model](#moroccan-darija-subtitles). |
 | `whisper_language` | str \| null | `null` | Speech language for Whisper (`ar`, `fr`, `en`). Unset: `[youtube] language`, else auto-detect. Separate from the metadata language, so Darija speech can get French titles. |
 | `whisper_vad` | bool | `true` | Skip silence before transcribing. Set `false` for the Darija model: the filter cut quiet speech under wind and engine noise. |
-| `transcript_refine_model` | str | `""` | Gemini model that corrects the transcript (spelling, Darija/French script) while keeping the speech model's word timing. Empty: off. Sends the clip's audio to Gemini; falls back to the draft on any error. |
+| `transcript_refine_model` | str | `""` | Gemini model that corrects the transcript (spelling, Darija/French script) while keeping the speech model's word timing. Empty: off. Sends the clip's audio to Gemini; an unusable reply gives no subtitles and an unavailable Gemini stops the run (the raw draft is never published). |
 
 ### Moroccan Darija subtitles
 
@@ -116,7 +118,7 @@ French phrases until it was told to leave unclear passages out.
 | `max_uploads_per_day` | int > 0 | `100` | Cap on `videos.insert` calls per day. |
 | `made_for_kids` | bool | `false` | `status.selfDeclaredMadeForKids` on every upload and privacy change. |
 | `contains_synthetic_media` | bool | `false` | `status.containsSyntheticMedia`. Set `true` if renders add realistic AI-generated content. |
-| `language` | `fr` \| `en` \| `ar` \| null | `null` | Sets `defaultLanguage` and `defaultAudioLanguage`, the language Gemini writes in, the call-to-action lines and fallback titles, and the Whisper language. Unset: Whisper auto-detects, Gemini follows the caption or transcript (French if there is none), and CTA lines and fallback titles are in French. |
+| `language` | `fr` \| `en` \| `ar` \| null | `null` | Sets `defaultLanguage` and `defaultAudioLanguage`, the call-to-action lines and fallback titles, and the Whisper language. Titles, descriptions, tags and the hook are written in French (`en` for English) whatever the speech language: Arabic script is rejected. The Darija only appears in the subtitle track. |
 | `upload_captions` | bool | `true` | After each upload, add the transcript as a YouTube subtitle track (`captions.insert`, 400 units). Viewers turn it on with the CC button; you can fix the text and timing in YouTube Studio → Subtitles. The SRT is also saved in `work/subtitles/<key>.srt`. If adding it fails, the video stays online and an alert gives that file to upload by hand. |
 | `caption_language` | str \| null | `null` | Language code of the subtitle track (`ar`, `fr`...). Unset: `whisper_language`, then `language`. If none is set, no track is added. |
 | `caption_name` | str | `""` | Track name shown next to the language in the player, e.g. `Darija`. |

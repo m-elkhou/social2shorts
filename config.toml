@@ -11,7 +11,9 @@ phash_threshold = 10
 phash_frames = 6
 phone_name_match = "S23"
 phone_video_folders = ["Movies/Edits", "Movies/Instagram"]
-gemini_model = "gemini-3.8-flash"   # needs GEMINI_API_KEY in the environment (2.5-flash retired for new users, 2026-10-31)
+gemini_model = "gemini-3.6-flash"   # needs GEMINI_API_KEY in the environment (2.5-flash retired for new users, 2026-10-31;
+                                    # 3.7 and 3.8 answered 503 "high demand" all morning of 2026-11-03, 3.5 and 3.6 did not)
+gemini_fallback_models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash"]  # own daily quota each (20 requests)
 # Moroccan Darija subtitles: a Darija speech model gives the words and their timing, then Gemini
 # corrects the spelling (Darija in Arabic script, French in Latin script) keeping that timing.
 # Build the model once with scripts/convert_darija_whisper.py. Refinement sends the clip's audio
@@ -20,6 +22,8 @@ whisper_model = "models/whisper-large-v3-turbo-darija-ct2"
 whisper_language = "ar"
 whisper_vad = false             # the silence filter cut quiet Darija speech (wind, engine)
 transcript_refine_model = "gemini-3-flash-preview"
+# gemini-3-flash-preview answered 503 for an hour on 2026-11-03: same fallback idea as gemini_model
+transcript_refine_fallback_models = ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
 [sources]
 tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"

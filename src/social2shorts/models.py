@@ -45,6 +45,7 @@ class ItemStatus(StrEnum):
     ready = "ready"  # approved by a human: processed first on the next run
     failed = "failed"  # processing error: retried until MAX_ATTEMPTS, then reviewed
     too_short = "too_short"  # raw clip below min_duration_s: a human decides
+    silent = "silent"  # no usable sound (owner, 2026-11-03: never upload those): a human decides
     not_video = "not_video"  # photo slideshow post: nothing to match or render, never retried
     rendered = "rendered"  # dry run output only
     uploading = "uploading"  # API call in flight; left behind only if the run crashed
@@ -62,6 +63,7 @@ class ReviewKind(StrEnum):
     error = "error"
     claim = "claim"
     short = "short"
+    silent = "silent"
     interrupted = "interrupted"  # crash during upload: check YouTube Studio before retrying
 
 
@@ -130,6 +132,31 @@ class MatchResult(BaseModel):
     confidence: float
     status: ItemStatus
     candidates: list[str] = Field(default_factory=list)
+
+
+MIN_MEAN_DB = -32.0  # whole-clip mean volume under which a clip counts as having no sound
+# (engine and wind give -23 to -9 dB on the channel's clips; muted clips -40 to -91 dB)
+
+
+class AudioLevel(BaseModel):
+    """Loudness of a clip's sound track, from ffmpeg ``volumedetect`` (dBFS)."""
+
+    has_audio: bool
+    mean_db: float | None = None
+    max_db: float | None = None
+
+    @property
+    def audible(self) -> bool:
+        """True when the clip has a sound track that is not (nearly) silent."""
+        return self.has_audio and self.mean_db is not None and self.mean_db >= MIN_MEAN_DB
+
+    def describe(self) -> str:
+        """Short reason for the review queue."""
+        if not self.has_audio:
+            return "no audio track"
+        if self.mean_db is None:
+            return "its volume could not be measured"
+        return f"mean volume {self.mean_db:.0f} dB, the limit is {MIN_MEAN_DB:.0f} dB"
 
 
 class ShortMeta(BaseModel):

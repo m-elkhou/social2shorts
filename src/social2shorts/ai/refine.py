@@ -15,11 +15,16 @@ import re
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from social2shorts.ai.metadata import LLMQuotaExceeded, gemini_client, is_daily_quota_error
+from social2shorts.ai.metadata import (
+    LLMQuotaExceeded,
+    LLMUnavailable,
+    generate_with_fallback,
+    is_daily_quota_error,
+)
 from social2shorts.montage.types import Word
 from social2shorts.ports import Transcriber
 
@@ -35,16 +40,28 @@ mishears some Darija.
 
 DRAFT: {draft}
 
-Listen to the audio and rewrite the draft correctly, phrase by phrase:
+Listen to the audio first and say what the voice is in "voice": moroccan_darija (the speaker \
+talks Moroccan Arabic, possibly mixed with French), french_or_english, standard_arabic (Modern \
+Standard Arabic read aloud or recited), other_arabic_dialect (Egyptian, Gulf, Levantine, \
+Algerian...), song_or_music (singing, rap, lyrics, instrumental) or no_speech. Only \
+moroccan_darija and french_or_english get segments; for the others answer no segments.
+\
+Then rewrite the draft correctly, phrase by phrase:
 - Each segment covers draft words first..last (inclusive indices) and gives their correct text. \
 Segments in order, no overlap, 1 to 6 draft words each.
 - Subtitle only people talking. Leave out singing and song lyrics, music, noise, wind, and \
 speech you cannot make out: a missing subtitle is better than a wrong one. The draft model \
 writes words even over pure music; if nobody talks, answer with no segments.
-- Darija in Arabic script as Moroccans write it on social media (never Modern Standard Arabic). \
-French and English in Latin script, correctly spelled. Spoken model numbers as digits \
+- Darija in Arabic script exactly as Moroccans write it on social media: ديال, واش, بزاف, دابا, \
+فين, كيفاش, علاش, شنو, غادي, كاين, ماشي, والو, هاد, مزيان, خويا. Keep the speaker's Moroccan \
+forms; never "correct" them toward Modern Standard Arabic (هذا, ماذا, لماذا, كيف, الآن, جداً, \
+لا يوجد) nor toward Egyptian, Gulf, Levantine or Algerian forms (دلوقتي, عايز, شو, هلق, وين, كي).
+- French and English in Latin script, correctly spelled. Spoken model numbers as digits \
 (mille trois cent quatre-vingt-dix -> 1390).
-- Write only what is actually said: do not summarise, shorten, translate, guess or invent."""
+- Write only what is actually said: do not summarise, shorten, translate, guess or invent. A word \
+you cannot make out is left out, never replaced by a plausible one.
+- A song, rap or lyrics playing over the clip is not the speaker: no segments for it, even when \
+the words are clear."""
 
 
 class RefinedSegment(BaseModel):
@@ -55,9 +72,17 @@ class RefinedSegment(BaseModel):
     text: str
 
 
+Voice = Literal[
+    "moroccan_darija", "french_or_english", "standard_arabic", "other_arabic_dialect",
+    "song_or_music", "no_speech",
+]  # fmt: skip
+SUBTITLED_VOICES = ("moroccan_darija", "french_or_english")  # the track is named "Darija"
+
+
 class RefinedTranscript(BaseModel):
     """The LLM's answer (also the JSON schema it must follow)."""
 
+    voice: Voice = "moroccan_darija"
     segments: list[RefinedSegment]
 
 
@@ -87,8 +112,9 @@ def _spread(text: str, start: float, end: float) -> list[Word]:
 def parse_refined(raw: str, draft: Sequence[Word]) -> list[Word]:
     """Words of the LLM reply, timed from the draft words each segment covers.
 
-    Segments holding only a placeholder like ``[...]`` are dropped; no segment at all means
-    nobody talks (music only), so the result is empty. Segments with indices outside the draft
+    A voice that is not Moroccan Darija or French/English (Modern Standard Arabic, a song) gives
+    no words. Segments holding only a placeholder like ``[...]`` are dropped; no segment at all
+    means nobody talks (music only), so the result is empty. Segments with indices outside the draft
     or overlapping an earlier segment are skipped.
 
     Raises:
@@ -96,9 +122,13 @@ def parse_refined(raw: str, draft: Sequence[Word]) -> list[Word]:
             with text has unusable indices.
     """
     try:
-        segments = RefinedTranscript.model_validate_json(raw).segments
+        reply = RefinedTranscript.model_validate_json(raw)
     except ValidationError as exc:
         raise ValueError(f"refined transcript does not match the schema: {exc}") from exc
+    if reply.voice not in SUBTITLED_VOICES:  # standard Arabic, a song...: not what the track is
+        log.info("Voice is %s: no subtitles", reply.voice)
+        return []
+    segments = reply.segments
     words: list[Word] = []
     last, bad = -1, 0
     for seg in segments:
@@ -129,52 +159,57 @@ class GeminiAudioRefiner:
     kept low: on a 52 s clip it answered in 3 s instead of 189 s with the same text.
     """
 
-    def __init__(self, model: str):
+    def __init__(self, model: str, fallbacks: Sequence[str] = ()):
         self.model = model
+        self.fallbacks = tuple(fallbacks)
 
     def refine(self, path: Path, draft: Sequence[Word]) -> list[Word]:
         """Corrected words for ``path``, timed like ``draft``."""
         from google.genai import types
 
-        # Keep a reference: the SDK closes its HTTP client as soon as the Client is collected,
-        # so ``genai.Client().models.generate_content(...)`` fails with "client has been closed".
-        client = gemini_client()
-        resp = client.models.generate_content(
-            model=self.model,
-            contents=[
+        resp = generate_with_fallback(
+            (self.model, *self.fallbacks),
+            [
                 types.Part.from_bytes(data=extract_audio(path), mime_type="audio/wav"),
                 build_prompt(draft),
             ],
-            config=types.GenerateContentConfig(
+            types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=RefinedTranscript,
                 temperature=0,
                 thinking_config=types.ThinkingConfig(thinking_level="low"),
             ),
-        )
+        )  # the shared client is cached: the SDK closes a client as soon as it is collected
         return parse_refined(resp.text or "", draft)
 
 
 class RefiningTranscriber:
-    """``Transcriber`` that refines another transcriber's draft, and falls back to the draft."""
+    """``Transcriber`` that refines another transcriber's draft.
+
+    A draft that cannot be refined is never published: the Darija speech model spells French
+    phonetically and mishears words (2026-11-03: gibberish tracks on 6 Shorts).
+    """
 
     def __init__(self, base: Transcriber, refiner: Refiner):
         self.base = base
         self.refiner = refiner
 
     def transcribe(self, path: Path) -> list[Word]:
-        """Draft from ``base``, corrected by ``refiner``; the draft itself if refining fails.
+        """Draft from ``base``, corrected by ``refiner``; no words if the reply is unusable.
 
         Raises:
             LLMQuotaExceeded: If the refiner's daily quota is spent.
+            LLMUnavailable: If the refiner cannot answer (the run stops and retries later).
         """
         draft = self.base.transcribe(path)
         if not draft:
             return draft
         try:
             return self.refiner.refine(path, draft)
-        except Exception as exc:  # network, bad reply: captions must not block the run
+        except ValueError as exc:  # the reply does not fit the draft: no subtitles beat bad ones
+            log.warning("Transcript refinement gave no usable text (%s); no subtitles", exc)
+            return []
+        except Exception as exc:  # network, overloaded model
             if is_daily_quota_error(exc):
                 raise LLMQuotaExceeded() from exc
-            log.warning("Transcript refinement failed (%s); using the speech-model draft", exc)
-            return draft
+            raise LLMUnavailable(f"Gemini is unavailable ({type(exc).__name__}: {exc})") from exc

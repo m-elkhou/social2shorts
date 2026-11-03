@@ -25,8 +25,9 @@ lives in one SQLite file.
 | `sources/tiktok_instagram.py` | `SocialCatalog` adapter: yt-dlp discovery and 540p reference download. |
 | `sources/phone.py` | `PhoneOriginals` adapter and `MtpPhoneSource` (Windows COM). |
 | `sources/inbox.py` | Inbox scanner: video files keyed by sha256. |
-| `ai/transcribe.py` | `WhisperTranscriber` adapter: word-level faster-whisper. |
-| `ai/metadata.py` | `GeminiLLM` adapter, prompt, `humanize()`, sanitizing, fallback metadata. |
+| `ai/transcribe.py` | `WhisperTranscriber` adapter: word-level faster-whisper, minus speech-model hallucinations (`drop_hallucinations`). |
+| `ai/frames.py` | `sample_frames`: six JPEG frames of a clip for the metadata model. |
+| `ai/metadata.py` | `GeminiLLM` adapter (text and frames), prompt, `check_meta`, `humanize()`, sanitizing, neutral fallback metadata. |
 | `publish/youtube.py` | `YouTubeClient` adapter: OAuth, resumable upload with retries, privacy. |
 | `publish/contentid.py` | Post-upload rights signals from `videos.list`. |
 | `publish/quota.py` | `QuotaBudget`: units and uploads per Pacific day. |
@@ -132,6 +133,7 @@ stateDiagram-v2
     discovered --> ambiguous: several originals match
     pending_original --> ambiguous: several originals match
     discovered --> too_short: raw clip under min_duration_s
+    discovered --> silent: no usable sound (source or render)
     discovered --> not_video: photo slideshow post
     discovered --> duplicate: item or source file already uploaded
     discovered --> rendered: dry run
@@ -146,12 +148,14 @@ stateDiagram-v2
     review_audio --> ready: review approve
     ambiguous --> ready: review approve with original
     too_short --> ready: review approve
+    silent --> ready: review approve
     failed --> ready: review approve
     ready --> uploading: processed first
     ready --> failed: third failure
     review_audio --> rejected: review reject
     ambiguous --> rejected: review reject
     too_short --> rejected: review reject
+    silent --> rejected: review reject
     failed --> rejected: review reject
     uploaded --> claimed: Content-ID guard
     claimed --> uploaded: publish with include-claimed
@@ -248,8 +252,19 @@ Errors:
 - `LLMQuotaExceeded` (Gemini's per-day 429; the free tier allows 20 requests per model per
   day) stops the run too, rather than publish videos with template titles and uncorrected
   subtitles. Temporary Gemini errors (408, 500, 502, 503 "high demand", 504) are retried for
-  about a minute first; after that, and for any other Gemini error, the item falls back
-  (template metadata, speech-model draft).
+  about a minute first; after that, and for any other Gemini error, `LLMUnavailable` stops the
+  run the same way (no attempt is charged, the next run tries again). Only a missing API key
+  uses the neutral fallback metadata, and no subtitle track is ever built from the raw speech
+  draft.
+- A clip with no usable sound (no audio track, or whole-clip mean volume under -32 dB, measured
+  by `media.audio_level`) becomes `silent` and goes to review, before any Whisper or Gemini work;
+  the render is checked too. `review --approve` overrides it (owner, 2026-11-03: no video
+  without sound).
+- The metadata model gets six frames of the clip and answers with what it counted (`riders`,
+  `onscreen_text`) before the title: `check_meta` rejects Arabic script and "solo" over a duo or
+  a group, the answer is asked again once, then the neutral fallback applies. A clip that
+  already carries text gets no hook card (the two would overlap). Kept renders carry a note
+  `version`; a note from before the rules changed is rendered again.
 - A catalog post whose reference has no video stream (a TikTok photo slideshow comes down as
   audio) becomes `not_video` and is never retried.
 - Anything else is an item failure, with one exception: if **3 items in a row fail with the
@@ -384,7 +399,7 @@ an existing one.
 | Circuit breaker | `FailureStreak` | A system-wide fault stops the run instead of burning every item's retries. |
 | Versioned migrations | `db.MIGRATIONS` + `PRAGMA user_version` | Old databases upgrade in place, atomically per step. |
 | Retry with backoff and jitter | `publish.youtube.run_resumable` | Survives 5xx and dropped connections during long uploads. |
-| Graceful fallback | `generate_metadata` | A Gemini outage never blocks an upload. |
+| Fail closed on quality | `generate_metadata`, `RefiningTranscriber`, `_audible` | A Gemini outage, a silent clip or a rejected answer waits or goes to review instead of publishing template text, a raw draft or a mute video. |
 | Lazy initialization | `YouTubeClient.service`, `functools.cache` on models, `Run.originals` | Heavy clients load only when needed; dry runs never touch OAuth. |
 | Functional core | `montage/planner.py`, `montage/filters.py`, `montage/captions.py` | Pure, deterministic functions: same input, same plan and ffmpeg command. Easy to test. |
 | Registry dispatch | `REFRAMES`, `CAPTION_STYLES` | Add a framing or caption style without touching callers. |
