@@ -170,11 +170,12 @@ Titles, descriptions, tags and the on-screen hook line are written by Gemini.
         ```
 
 `GOOGLE_API_KEY` works too. The model is `gemini_model` (default `gemini-2.5-flash`). Only
-your own public caption and the transcript are sent.
+your own public caption, the transcript and six frames of the clip are sent.
 
-Without a key the run logs a warning and falls back to the caption, or to a title composed
-per video from word pools (time of day from the file name or post date, keywords from the
-transcript). No hook card is drawn in that case, because the hook line comes from the LLM.
+Without a key the run logs a warning and falls back to the caption (French only), or to a
+neutral title composed per video from word pools (time of day from the file name or post date).
+It says nothing about who rides, the sound or the place, since nobody looked at the clip. No
+hook card is drawn in that case, because the hook line comes from the LLM.
 
 ## 5. First dry run
 

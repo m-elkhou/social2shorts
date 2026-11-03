@@ -6,7 +6,7 @@ from fakes import NOW, FakeLLM, GeminiDailyQuota, entry, settled
 
 from social2shorts import operations
 from social2shorts.db import Store
-from social2shorts.models import Claim, ItemStatus, Privacy
+from social2shorts.models import AudioLevel, Claim, ItemStatus, Privacy
 from social2shorts.montage.types import MontageMode
 from social2shorts.phash import NoVideoStream
 from social2shorts.pipeline import (
@@ -301,11 +301,79 @@ def test_private_lock_stores_actual_privacy(settings, deps, caplog):
     assert "locked to private" in caplog.text
 
 
-def test_llm_failure_falls_back_and_still_uploads(settings, deps):
-    deps.llm = FakeLLM(error=RuntimeError("429"))
+def test_an_unavailable_model_stops_the_run_and_publishes_no_template(settings, deps):
+    deps.llm = FakeLLM(error=RuntimeError("503 UNAVAILABLE"))
     r = run_pipeline(settings, deps, CATALOG)
-    assert len(r.uploaded) == 1
-    assert deps.platform.uploads[0]["meta"].title == "cap A"
+    assert r.uploaded == [] and deps.platform.uploads == []
+    assert "unavailable" in r.stop_reason and "tries again" in r.stop_reason
+    assert _store(settings).item("A").attempts == 0  # not the video's fault
+
+
+def test_no_api_key_still_uploads_with_the_neutral_fallback(settings, deps):
+    deps.llm = None
+    r = run_pipeline(settings, deps, CATALOG)
+    assert len(r.uploaded) == 1 and deps.platform.uploads[0]["meta"].title == "cap A"
+
+
+def test_frames_of_the_source_reach_the_metadata_model(settings, deps):
+    deps.frames = lambda path: [b"frame-1", b"frame-2"]
+    run_pipeline(settings, deps, CATALOG)
+    assert deps.llm.images == [(b"frame-1", b"frame-2")]
+    assert "2 frames" in deps.llm.prompts[0]
+
+
+# --- owner, 2026-11-03: a video without sound is never published ---------------------------
+SILENT = AudioLevel(has_audio=True, mean_db=-91.0, max_db=-91.0)
+
+
+def test_a_silent_source_goes_to_review_before_any_work(settings, deps):
+    deps.media.levels["A"] = SILENT
+    r = run_pipeline(settings, deps, CATALOG)
+    assert "A" in r.review and r.uploaded == [] and deps.renderer.calls == []
+    store = _store(settings)
+    assert store.item("A").status is ItemStatus.silent and store.review("A")["kind"] == "silent"
+    assert "no usable sound" in store.review("A")["reason"]
+
+
+def test_a_source_without_audio_track_counts_as_silent(settings, deps):
+    deps.media.levels["A"] = AudioLevel(has_audio=False)
+    assert "A" in run_pipeline(settings, deps, CATALOG).review
+
+
+def test_a_silent_render_is_dropped_and_not_uploaded(settings, deps):
+    original_render = deps.renderer.render
+
+    def render(src, dst, **kw):
+        out = original_render(src, dst, **kw)
+        deps.media.levels[dst.stem] = SILENT  # the montage cut only the quiet part
+        return out
+
+    deps.renderer.render = render
+    r = run_pipeline(settings, deps, CATALOG)
+    assert "A" in r.review and deps.platform.uploads == []
+    assert not (Path(settings.work_dir) / "renders" / "A.mp4").exists()
+    assert _store(settings).item("A").status is ItemStatus.silent
+
+
+def test_approving_a_silent_video_overrides_the_gate(settings, deps):
+    deps.media.levels["A"] = SILENT
+    run_pipeline(settings, deps, CATALOG)
+    operations.approve(_store(settings), "A")
+    r = run_pipeline(settings, deps, CATALOG)
+    assert [u.item_key for u in r.uploaded] == ["A"]
+
+
+def test_a_render_kept_by_an_older_version_is_made_again(settings, deps):
+    import json
+
+    run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, limit=1, dry_run=True))
+    note = Path(settings.work_dir) / "renders" / "A.json"
+    data = json.loads(note.read_text(encoding="utf-8"))
+    assert data["version"] >= 2
+    del data["version"]  # a note written before the metadata rules of 2026-11-03
+    note.write_text(json.dumps(data), encoding="utf-8")
+    run_pipeline(settings, deps, RunOptions(source=SourceChoice.catalog, limit=1))
+    assert len(deps.renderer.calls) == 2
 
 
 def test_failures_retry_then_go_to_review(settings, deps):

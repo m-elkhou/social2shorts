@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 
 from social2shorts.db import Store
+from social2shorts.models import AudioLevel
 from social2shorts.phash import phash_file
 
 CHUNK = 1 << 20  # 1 MiB
@@ -25,6 +27,32 @@ def ffprobe_duration(path: Path) -> float:
         capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
     )  # fmt: skip
     return float(res.stdout.strip())
+
+
+_VOLUME = re.compile(r"(mean|max)_volume: (-?[\d.]+|-inf) dB")
+
+
+def audio_level(path: Path) -> AudioLevel:
+    """Mean and peak volume of ``path``'s sound (ffmpeg ``volumedetect``); no audio track is
+    reported as such.
+
+    Raises:
+        subprocess.CalledProcessError: If ffprobe or ffmpeg cannot read the file.
+    """
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+    )  # fmt: skip
+    if not probe.stdout.strip():
+        return AudioLevel(has_audio=False)
+    res = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-nostdin", "-i", str(path), "-vn",
+         "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+    )  # fmt: skip
+    found = {kind: float(v) for kind, v in _VOLUME.findall(res.stderr)}
+    return AudioLevel(has_audio=True, mean_db=found.get("mean"), max_db=found.get("max"))
 
 
 def sha256_file(path: Path) -> str:
@@ -56,3 +84,7 @@ class LocalMedia:
     def phashes(self, path: Path, n_frames: int) -> list[str]:
         """See :func:`social2shorts.phash.phash_file`."""
         return phash_file(path, n_frames)
+
+    def audio_level(self, path: Path) -> AudioLevel:
+        """See :func:`audio_level`."""
+        return audio_level(path)

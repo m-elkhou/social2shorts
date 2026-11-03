@@ -20,7 +20,13 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Protocol
 
-from social2shorts.ai.metadata import GeminiLLM, LLMQuotaExceeded, generate_metadata
+from social2shorts.ai.frames import no_frames, sample_frames
+from social2shorts.ai.metadata import (
+    GeminiLLM,
+    LLMQuotaExceeded,
+    LLMUnavailable,
+    generate_metadata,
+)
 from social2shorts.ai.refine import GeminiAudioRefiner, RefiningTranscriber
 from social2shorts.ai.transcribe import WhisperTranscriber
 from social2shorts.config import Settings
@@ -72,6 +78,7 @@ from social2shorts.sources.tiktok_instagram import SocialCatalog
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+NOTE_VERSION = 2  # bump when what a kept render carries (title, hook, subtitles) must be redone
 SYSTEMIC_FAILURES = 3  # same error on this many items in a row = system fault, stop the run
 LOCK_NAME = "social2shorts.lock"
 GUARD_LOOKBACK = timedelta(days=3)
@@ -106,6 +113,7 @@ class PipelineDeps:
     renderer: Renderer
     platform: VideoPlatform
     clock: Callable[[], datetime] = utcnow
+    frames: Callable[[Path], list[bytes]] = no_frames  # JPEG frames the metadata model looks at
 
     @classmethod
     def default(cls, settings: Settings) -> PipelineDeps:
@@ -121,7 +129,10 @@ class PipelineDeps:
         )
         if has_key and settings.transcript_refine_model:
             transcriber = RefiningTranscriber(
-                transcriber, GeminiAudioRefiner(settings.transcript_refine_model)
+                transcriber,
+                GeminiAudioRefiner(
+                    settings.transcript_refine_model, settings.transcript_refine_fallback_models
+                ),
             )
         return cls(
             catalog=SocialCatalog(
@@ -133,7 +144,9 @@ class PipelineDeps:
             ),
             media=LocalMedia(),
             transcriber=transcriber,
-            llm=GeminiLLM(settings.gemini_model) if has_key else None,
+            llm=GeminiLLM(settings.gemini_model, settings.gemini_fallback_models)
+            if has_key
+            else None,
             renderer=MontageRenderer(),
             platform=YouTubeClient(
                 yt.client_secrets,
@@ -143,6 +156,7 @@ class PipelineDeps:
                 made_for_kids=yt.made_for_kids,
                 synthetic_media=yt.contains_synthetic_media,
             ),  # fmt: skip
+            frames=sample_frames if has_key else no_frames,
         )
 
 
@@ -416,6 +430,24 @@ def _hint(item: Item, source: Path) -> str:
     return item.entry.upload_date if item.entry else source.stem
 
 
+def _audible(run: Run, item: Item, path: Path, what: str) -> bool:
+    """False, and the item goes to review, when ``path`` has no usable sound.
+
+    Owner, 2026-11-03: a video without sound is never published. ``review --approve`` overrides.
+    """
+    if item.status is ItemStatus.ready:
+        return True
+    level = run.deps.media.audio_level(path)
+    if level.audible:
+        return True
+    _to_review(
+        run, item, ItemStatus.silent, ReviewKind.silent,
+        f"{what} has no usable sound ({level.describe()}). If it is fine anyway: "
+        f"review --approve {item.key}; otherwise review --reject {item.key}",
+    )  # fmt: skip
+    return False
+
+
 def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
     """Take one item as far as it can go (shared by every source kind).
 
@@ -432,6 +464,8 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
     if run.store.is_content_uploaded(sha):
         _skip_duplicate(run, item, f"{source.path.name} was already uploaded for another post")
         return
+    if not _audible(run, item, source.path, source.path.name):
+        return
     settings = run.settings.montage.model_copy(update={"mode": source.mode})
     note = _render_note(run, item)
     cached = _cached_render(note, sha, settings)
@@ -447,6 +481,7 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
             key=item.key,
             language=run.settings.youtube.language,
             hint=_hint(item, source.path),
+            images=run.deps.frames(source.path) if run.deps.llm else [],
         )
         rendered = run.deps.renderer.render(
             source.path,
@@ -458,6 +493,10 @@ def process_item(run: Run, strategy: SourceStrategy, item: Item) -> None:
         out = rendered.path
         srt = _save_subtitles(run, item, rendered.words)
         _write_note(note, out, sha, settings, meta, srt)
+    if not _audible(run, item, out, "the render"):
+        _remove(out)
+        _remove(note)
+        return
     if run.options.dry_run:
         run.store.set_status(item.key, ItemStatus.rendered)
         run.report.rendered.append(item.key)
@@ -478,8 +517,9 @@ def _render_note(run: Run, item: Item) -> Path:
 def _write_note(
     note: Path, out: Path, sha: str, settings: MontageSettings, meta: ShortMeta, srt: str | None
 ) -> None:
-    data = {"video": str(out), "source_sha256": sha, "montage": settings.model_dump(mode="json"),
-            "meta": meta.model_dump(mode="json"), "srt": srt}  # fmt: skip
+    data = {"version": NOTE_VERSION, "video": str(out), "source_sha256": sha,
+            "montage": settings.model_dump(mode="json"), "meta": meta.model_dump(mode="json"),
+            "srt": srt}  # fmt: skip
     try:
         note.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     except OSError as exc:  # only an optimisation: the next run renders again
@@ -494,7 +534,8 @@ def _cached_render(
     try:
         data = json.loads(note.read_text(encoding="utf-8"))
         out = Path(data["video"])
-        if (data["source_sha256"] != sha or data["montage"] != settings.model_dump(mode="json")
+        if (data.get("version") != NOTE_VERSION or data["source_sha256"] != sha
+                or data["montage"] != settings.model_dump(mode="json")
                 or not out.is_file()):  # fmt: skip
             return None
         return out, ShortMeta.model_validate(data["meta"]), data["srt"] or None
@@ -765,7 +806,13 @@ def _process_queue(run: Run, kinds: list[SourceKind]) -> None:
             break
         try:
             process_item(run, strategy, item)
-        except (AuthRefreshError, QuotaExceededError, LLMQuotaExceeded, ScheduleFull):
+        except (
+            AuthRefreshError,
+            QuotaExceededError,
+            LLMQuotaExceeded,
+            LLMUnavailable,
+            ScheduleFull,
+        ):
             streak.settle()
             raise
         except Exception as exc:
@@ -818,6 +865,8 @@ def run_pipeline(settings: Settings, deps: PipelineDeps, options: RunOptions) ->
         )
     except LLMQuotaExceeded as exc:
         report.stop_reason = f"{exc}; continuing when it resets (midnight Pacific time)"
+    except LLMUnavailable as exc:
+        report.stop_reason = f"{exc}; the next run tries again (nothing was published)"
     except ScheduleFull as exc:
         report.stop_reason = f"publication schedule is full ({exc})"
     return report

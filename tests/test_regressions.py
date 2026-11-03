@@ -93,9 +93,21 @@ def test_stale_lock_is_replaced(tmp_path):
     with single_instance(lock):
         assert lock.read_text() == str(os.getpid())
     assert not lock.exists()
-    lock.write_text("123")
+    lock.write_text(str(os.getpid()))  # a live owner holds it
     with pytest.raises(AlreadyRunning), single_instance(lock):
         pass
+
+
+def test_lock_of_a_dead_process_is_replaced_at_once(tmp_path):
+    import subprocess
+    import sys
+
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    lock = tmp_path / "x.lock"
+    lock.write_text(str(done.pid))  # fresh, but its owner is gone (a killed run)
+    with single_instance(lock):
+        assert lock.read_text() == str(os.getpid())
 
 
 def test_status_is_uploading_during_the_api_call(settings, deps):
@@ -363,20 +375,21 @@ def test_fallback_titles_are_varied_and_french_by_default():
                                             hint="VID_20260808_070000").title  # fmt: skip
 
 
-def test_transcript_keywords_feed_fallback():
-    m = generate_metadata(None, "", "la corniche était vide, toute la corniche", key="raw-1")
-    assert "corniche" in m.title and "corniche" in m.tags
+def test_transcript_never_feeds_the_fallback():
+    # "Tour rapide sans filtre : موسيقى" went online when the transcript was a music label
+    m = generate_metadata(None, "", "موسيقى موسيقى موسيقى", key="raw-1")
+    assert "موسيقى" not in m.title and m.tags == ["moto"]
 
 
 def test_cta_language_follows_config():
-    ar = {c for c in CTAS["ar"] if c}
+    en = {c for c in CTAS["en"] if c}
     descriptions = [
         sanitize_meta(
-            {"title": "t", "description": "d"}, caption="", key=f"k{i}", language="ar"
+            {"title": "t", "description": "d"}, caption="", key=f"k{i}", language="en"
         ).description
         for i in range(30)
     ]
-    assert any(c in d for d in descriptions for c in ar)
+    assert any(c in d for d in descriptions for c in en)
 
 
 # 14. Region allow-lists ---------------------------------------------------------------

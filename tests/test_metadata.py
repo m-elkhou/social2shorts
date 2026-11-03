@@ -8,14 +8,19 @@ from social2shorts.ai.metadata import (
     BANNED,
     CTAS,
     MAX_HOOK,
+    LLMQuotaExceeded,
+    LLMUnavailable,
+    MetadataRejected,
     build_prompt,
+    check_meta,
+    content_tags,
     fallback_meta,
     gemini_http_options,
     generate_metadata,
     humanize,
     sanitize_meta,
 )
-from social2shorts.ai.transcribe import WhisperTranscriber
+from social2shorts.ai.transcribe import WhisperTranscriber, drop_hallucinations
 from social2shorts.montage.types import Word
 
 
@@ -78,11 +83,16 @@ def test_generate_metadata_with_llm():
     assert m.tags == ["sea"]
 
 
-@pytest.mark.parametrize("llm", [FakeLLM(error=RuntimeError("429")), FakeLLM(reply="not json"),
+@pytest.mark.parametrize("llm", [FakeLLM(reply="not json"),
                                  FakeLLM(reply=json.dumps({"title": ""})), None])  # fmt: skip
 def test_generate_metadata_falls_back(llm):
     m = generate_metadata(llm, "@me Sunset run on the coast #moto #fyp", "", key="A")
     assert m.title == "Sunset run on the coast" and m.tags == ["moto"]
+
+
+def test_a_model_that_cannot_answer_stops_instead_of_publishing_a_template():
+    with pytest.raises(LLMUnavailable):
+        generate_metadata(FakeLLM(error=RuntimeError("503 UNAVAILABLE")), "cap", "", key="A")
 
 
 def test_fallback_for_raw_footage_is_varied():
@@ -90,16 +100,28 @@ def test_fallback_for_raw_footage_is_varied():
     assert len(titles) >= 4
 
 
-def test_prompt_asks_for_human_voice():
-    p = build_prompt("Sunday ride", "on y va", "fr")
-    assert "first person" in p and "Sunday ride" in p and "on y va" in p and "fr" in p
+def test_prompt_asks_for_french_and_for_what_the_frames_show():
+    p = build_prompt("Sunday ride", "on y va", "fr", frames=6)
+    assert "Sunday ride" in p and "on y va" in p and "French ONLY" in p
+    assert "6 frames" in p and "ground truth" in p and '"riders"' in p and '"onscreen_text"' in p
     assert '"hook"' in p and all(w in p for w in ("unleash", "breathtaking"))
     assert len(BANNED) >= 7
 
 
+def test_prompt_without_frames_forbids_describing_the_picture():
+    assert "no frames" in build_prompt("", "", "fr")
+
+
+def test_language_other_than_fr_or_en_means_french():
+    assert "French ONLY" in build_prompt("", "", "ar")
+
+
 def test_transcriber_returns_words():
     seg = SimpleNamespace(words=[SimpleNamespace(start=0, end=0.4, word=" Salut"),
-                                 SimpleNamespace(start=0.4, end=0.5, word=" ")])  # fmt: skip
+                                 SimpleNamespace(start=0.4, end=0.5, word=" "),
+                                 SimpleNamespace(start=0.5, end=0.8, word="tout"),
+                                 SimpleNamespace(start=0.8, end=1.0, word="le"),
+                                 SimpleNamespace(start=1.0, end=1.2, word="monde")])  # fmt: skip
     seen = {}
 
     class Model:
@@ -108,7 +130,7 @@ def test_transcriber_returns_words():
             return iter([seg, SimpleNamespace(words=None)]), None
 
     words = WhisperTranscriber(model=Model(), language="fr").transcribe("x.mp4")
-    assert words == [Word(start=0.0, end=0.4, text="Salut")]
+    assert [w.text for w in words] == ["Salut", "tout", "le", "monde"]
     assert seen["word_timestamps"] is True and seen["language"] == "fr"
     assert seen["vad_filter"] is True  # default: skip silence
 
@@ -120,3 +142,191 @@ def test_gemini_retries_busy_server_but_not_spent_quota():
     retry = gemini_http_options().retry_options
     assert retry.attempts > 1 and 503 in retry.http_status_codes
     assert 429 not in retry.http_status_codes  # a spent daily quota stops the run at once
+    assert 0 < gemini_http_options().timeout <= 300_000  # an overloaded model must not hang a run
+
+
+# --- speech-model hallucinations (2026-11-03: "subscribe to the channel" on muted videos) -----
+def _words(text: str) -> list[Word]:
+    return [Word(start=i, end=i + 0.5, text=t) for i, t in enumerate(text.split())]
+
+
+@pytest.mark.parametrize("text", [
+    "اشتركوا في القناة", "شتركوا في القناة", "(موسيقى) موسيقى", "موسيقى موسيقى",
+    "وي وي وي تترى تترى تترى تترى", "Thanks for watching!", "محمد ام",
+    "شتركوا في القناة موسيقى",
+])  # fmt: skip
+def test_hallucinations_and_loops_give_no_words(text):
+    assert drop_hallucinations(_words(text)) == []
+
+
+@pytest.mark.parametrize("text", [
+    "هاني عاوتاني على Super Adventure S في 1390 البيض بالبيض",
+    "ديش خدامي زماني غادي كيطيح وقع لي الوشواش",
+    "Eh oui boîte automatique sensation bizarre",
+])  # fmt: skip
+def test_real_speech_is_kept(text):
+    assert drop_hallucinations(_words(text)) == _words(text)
+
+
+# --- checks on the model's answer ------------------------------------------------------------
+def _answer(**kw) -> dict:
+    base = {"title": "Sortie en groupe dans les Cévennes", "description": "Des motos en file.",
+            "tags": ["cévennes"], "hook": "Les virages d'automne", "riders": "group",
+            "onscreen_text": False}  # fmt: skip
+    return base | kw
+
+
+def test_a_good_answer_passes():
+    check_meta(_answer())
+
+
+@pytest.mark.parametrize("bad", [
+    {"title": "لفة سريعة بالدراجة"}, {"description": "خرجة بالموطو"}, {"hook": "ركز في حياتك"},
+    {"tags": ["موطو"]}, {"riders": "everyone"},
+    {"title": "Balade solo dans les Cévennes"}, {"description": "Je roule seul."},
+    {"hook": "Solo ride", "riders": "duo"}, {"hook": "En solo sur la route", "riders": "solo"},
+])  # fmt: skip
+def test_answers_in_arabic_or_solo_over_a_group_are_rejected(bad):
+    with pytest.raises(MetadataRejected):
+        check_meta(_answer(**bad))
+
+
+def test_solo_is_only_allowed_when_the_owner_says_it():
+    answer = _answer(riders="solo", title="Balade solo au coucher du soleil")
+    with pytest.raises(MetadataRejected):
+        check_meta(answer)  # a POV camera does not show who rides out of frame
+    check_meta(answer, caption="Ma balade solo du dimanche")
+
+
+def test_a_rejected_answer_is_asked_again_with_the_reason_and_the_frames():
+    class Twice(FakeLLM):
+        def complete_json(self, prompt, images=()):
+            super().complete_json(prompt, images)
+            return json.dumps(_answer(title="خرجة بالموطو") if len(self.prompts) == 1
+                              else _answer(title="Sortie en groupe"))  # fmt: skip
+
+    llm = Twice()
+    m = generate_metadata(llm, "", "", key="k", images=[b"jpeg1", b"jpeg2"])
+    assert m.title == "Sortie en groupe" and len(llm.prompts) == 2
+    assert "Arabic script" in llm.prompts[1] and llm.images == [(b"jpeg1", b"jpeg2")] * 2
+    assert "2 frames" in llm.prompts[0]
+
+
+def test_two_rejected_answers_give_the_neutral_fallback_never_the_rejected_text():
+    llm = FakeLLM(reply=json.dumps(_answer(title="Balade solo", riders="group")))
+    m = generate_metadata(llm, "", "", key="raw-1", hint="VID_20260808_070000")
+    assert len(llm.prompts) == 2 and "solo" not in m.title.lower()
+
+
+def test_no_hook_when_the_clip_already_has_text():
+    m = sanitize_meta(_answer(onscreen_text=True), caption="", key="k")
+    assert m.hook == ""
+    assert sanitize_meta(_answer(), caption="", key="k").hook == "Les virages d'automne"
+
+
+def test_fallback_claims_nothing_about_riders_sound_or_place():
+    claims = ("solo", "seul", "son d'origine", "musique", "moteur", "guidon", "pov", "avenue")
+    for i in range(200):
+        m = fallback_meta("", key=f"raw-{i}", hint=f"VID_2026{i % 12 + 1:02d}15_{i % 24:02d}0000")
+        text = f"{m.title} {m.description}".lower().replace("au guidon", "")  # channel line
+        assert not any(c in text for c in claims), text
+
+
+def test_fallback_ignores_an_arabic_caption():
+    m = fallback_meta("غير كيطفى الأنتركوم #moto", key="k")
+    assert not any("\u0600" <= ch <= "\u06ff" for ch in m.title + m.description)
+
+
+def test_tags_drop_post_ids_and_arabic():
+    assert content_tags(["Ktm"], "TikTok video #7638936057915985172 #موطو #balademoto") == [
+        "ktm",
+        "balademoto",
+    ]
+
+
+def test_quota_error_from_the_model_is_not_hidden():
+    from fakes import GeminiDailyQuota
+
+    with pytest.raises(LLMQuotaExceeded):
+        generate_metadata(FakeLLM(error=GeminiDailyQuota()), "cap", "", key="A")
+
+
+# --- model fallbacks ---------------------------------------------------------------------------
+class _Models:
+    def __init__(self, behaviour):
+        self.behaviour = behaviour
+        self.calls = []
+
+    def generate_content(self, *, model, contents, config):
+        self.calls.append(model)
+        result = self.behaviour[model]
+        if isinstance(result, Exception):
+            raise result
+        return SimpleNamespace(text=result)
+
+
+def _gemini(monkeypatch, behaviour):
+    from social2shorts.ai import metadata
+
+    models = _Models(behaviour)
+    monkeypatch.setattr(metadata, "_genai_client", lambda: SimpleNamespace(models=models))
+    return models
+
+
+def _server_error(code=503):
+    exc = RuntimeError(f"{code} UNAVAILABLE high demand")
+    exc.code = code
+    return exc
+
+
+def test_an_overloaded_model_falls_through_to_the_next(monkeypatch):
+    from social2shorts.ai.metadata import GeminiLLM
+
+    models = _gemini(monkeypatch, {"a": _server_error(), "b": "{}"})
+    assert GeminiLLM("a", ["b"]).complete_json("p") == "{}" and models.calls == ["a", "b"]
+
+
+def test_a_spent_daily_quota_falls_through_to_the_next(monkeypatch):
+    from fakes import GeminiDailyQuota
+
+    from social2shorts.ai.metadata import GeminiLLM
+
+    models = _gemini(monkeypatch, {"a": GeminiDailyQuota(), "b": "ok"})
+    assert GeminiLLM("a", ["b"]).complete_json("p") == "ok" and models.calls == ["a", "b"]
+
+
+def test_every_model_failing_raises_the_last_error(monkeypatch):
+    from fakes import GeminiDailyQuota
+
+    from social2shorts.ai.metadata import GeminiLLM
+
+    _gemini(monkeypatch, {"a": _server_error(), "b": GeminiDailyQuota()})
+    llm = GeminiLLM("a", ["b"])
+    with pytest.raises(LLMQuotaExceeded):
+        generate_metadata(llm, "cap", "", key="k")
+
+
+def test_a_client_error_does_not_burn_the_other_models(monkeypatch):
+    from social2shorts.ai.metadata import GeminiLLM
+
+    bad = RuntimeError("400 INVALID_ARGUMENT")
+    bad.code = 400
+    models = _gemini(monkeypatch, {"a": bad, "b": "ok"})
+    with pytest.raises(RuntimeError):
+        GeminiLLM("a", ["b"]).complete_json("p")
+    assert models.calls == ["a"]
+
+
+def test_the_audio_refiner_also_falls_through_to_the_next_model(monkeypatch, tmp_path):
+    from social2shorts.ai import refine
+
+    models = _gemini(
+        monkeypatch,
+        {"a": _server_error(), "b": json.dumps({"voice": "moroccan_darija", "segments": [
+            {"first": 0, "last": 0, "text": "salam"}]})},
+    )  # fmt: skip
+    monkeypatch.setattr(refine, "extract_audio", lambda path: b"wav")
+    out = refine.GeminiAudioRefiner("a", ["b"]).refine(
+        tmp_path / "v.mp4", [Word(start=0, end=1, text="x")]
+    )
+    assert [w.text for w in out] == ["salam"] and models.calls == ["a", "b"]
