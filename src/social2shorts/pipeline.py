@@ -155,6 +155,7 @@ class PipelineDeps:
                 language=yt.language,
                 made_for_kids=yt.made_for_kids,
                 synthetic_media=yt.contains_synthetic_media,
+                signature=yt.description_signature,
             ),  # fmt: skip
             frames=sample_frames if has_key else no_frames,
         )

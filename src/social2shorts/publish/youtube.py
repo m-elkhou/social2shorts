@@ -133,8 +133,13 @@ def hashtag_line(tags: Sequence[str], limit: int = MAX_DESC_HASHTAGS) -> str:
     return " ".join([*(f"#{w}" for w in words[: limit - 1]), "#Shorts"])
 
 
-def with_hashtags(description: str, tags: Sequence[str]) -> str:
-    """Append the hashtag line, unless the description already carries ``#Shorts``."""
+def with_hashtags(description: str, tags: Sequence[str], signature: str = "") -> str:
+    """Append the channel signature, then the hashtag line (not if ``#Shorts`` is already there).
+
+    At upload, not in the metadata step: a render made before a signature change still gets it.
+    """
+    if signature and signature not in description:
+        description = f"{description}\n\n{signature}"
     if "#shorts" in description.lower():
         return description
     return f"{description}\n\n{hashtag_line(tags)}".strip()
@@ -158,11 +163,12 @@ def build_body(
     publish_at: datetime | None = None,
     made_for_kids: bool = False,
     synthetic_media: bool = False,
+    signature: str = "",
 ) -> dict:
     """``videos.insert`` body; a ``publish_at`` forces ``private`` + scheduled publication."""
     snippet: dict[str, Any] = {
         "title": meta.title,
-        "description": with_hashtags(meta.description, meta.tags),
+        "description": with_hashtags(meta.description, meta.tags, signature),
         "tags": _fit_tags(meta.tags),
         "categoryId": category_id,
     }
@@ -266,6 +272,7 @@ class YouTubeClient:
         language: str | None = None,
         made_for_kids: bool = False,
         synthetic_media: bool = False,
+        signature: str = "",
         service: Any = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
@@ -275,6 +282,7 @@ class YouTubeClient:
         self.language = language
         self.made_for_kids = made_for_kids
         self.synthetic_media = synthetic_media
+        self.signature = signature
         self._service = service
         self.sleep = sleep
 
@@ -300,7 +308,7 @@ class YouTubeClient:
         body = build_body(
             meta, privacy, category_id=self.category_id, language=self.language,
             publish_at=publish_at, made_for_kids=self.made_for_kids,
-            synthetic_media=self.synthetic_media,
+            synthetic_media=self.synthetic_media, signature=self.signature,
         )  # fmt: skip
         media = MediaFileUpload(str(path), mimetype="video/mp4", chunksize=8 << 20, resumable=True)
         request = self.service.videos().insert(part="snippet,status", body=body, media_body=media)

@@ -18,3 +18,4 @@ coverage.xml
 htmlcov/
 site/
 *.db
+_duplicates/

@@ -45,6 +45,17 @@ def test_description_ends_with_content_hashtags_then_shorts():
     assert last == "#ktm #moto #lc8 #roadtrip #ktm1390superadventure #Shorts"
 
 
+def test_signature_sits_between_the_text_and_the_hashtags():
+    meta = META.model_copy(update={"description": "Une balade.", "tags": ["moto"]})
+    body = build_body(meta, "unlisted", signature="Instagram : @moi")
+    assert body["snippet"]["description"] == "Une balade.\n\nInstagram : @moi\n\n#moto #Shorts"
+
+
+def test_signature_is_not_doubled_and_survives_an_existing_shorts_tag():
+    assert yt.with_hashtags("x\n\nsig", ["moto"], "sig") == "x\n\nsig\n\n#moto #Shorts"
+    assert yt.with_hashtags("x #Shorts", [], "sig") == "x #Shorts\n\nsig"
+
+
 def test_hashtag_line_stays_under_youtube_limit():
     line = yt.hashtag_line([f"tag{i}" for i in range(20)])
     assert line.count("#") == yt.MAX_DESC_HASHTAGS and line.endswith("#Shorts")

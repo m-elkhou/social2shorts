@@ -45,6 +45,7 @@ class YouTubeSettings(BaseModel):
     upload_captions: bool = True  # add the transcript as a subtitle track (captions.insert)
     caption_language: str | None = None  # track language; None: whisper_language, then language
     caption_name: str = ""  # track name shown next to the language, e.g. "Darija"
+    description_signature: str = ""  # line added to every description, above the hashtags
 
 
 class ScheduleSettings(BaseModel):
