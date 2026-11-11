@@ -120,6 +120,8 @@ nav:
   - Development:
       - Contributing: development.md
       - Roadmap: roadmap.md
+      - TODO: todo.md
+      - Handoff: handoff.md
   - Research:
       - State of the art: research/state-of-the-art.md
       - Original design (FR): research/original-design-fr.md

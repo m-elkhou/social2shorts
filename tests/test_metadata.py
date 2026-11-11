@@ -330,3 +330,35 @@ def test_the_audio_refiner_also_falls_through_to_the_next_model(monkeypatch, tmp
         tmp_path / "v.mp4", [Word(start=0, end=1, text="x")]
     )
     assert [w.text for w in out] == ["salam"] and models.calls == ["a", "b"]
+
+
+def test_description_hooks_tells_asks_and_presents_the_channel():
+    """Owner, 2026-11-11: descriptions were too thin. First line = teaser, then the story in two
+    paragraphs, a question for the comments, the channel line; signature and hashtags at upload."""
+    from social2shorts.publish.youtube import description_problems, with_hashtags
+
+    raw = {"title": "Balade dans les Cévennes", "teaser": "🔥 Les Cévennes entre potes",
+           "description": "Une file de motos dans les virages.\n\nLa forêt défile, ciel bleu.",
+           "question": "Tu connais les Cévennes ?", "tags": ["cevennes"]}  # fmt: skip
+    d = sanitize_meta(raw, caption="", key="k", language="fr").description
+    parts = d.split("\n\n")
+    assert parts[0] == "🔥 Les Cévennes entre potes"
+    assert parts[1:3] == [
+        "Une file de motos dans les virages.",
+        "La forêt défile, ciel bleu.",
+    ]
+    assert parts[3].replace(" ?", "?") == "Tu connais les Cévennes? 👇"  # humanize() spacing
+    assert parts[4].startswith("🏍️ Moto Ride Vlog")
+    final = with_hashtags(d, ["cevennes"], "📸 Suis-moi sur Instagram : @moi")
+    assert description_problems(final, "📸 Suis-moi sur Instagram : @moi") == []
+
+
+def test_description_without_teaser_or_question_still_follows_the_format():
+    from social2shorts.publish.youtube import description_problems, with_hashtags
+
+    for i in range(30):
+        m = fallback_meta("", key=f"raw-{i}")
+        first, *_, question, channel = m.description.split("\n\n")
+        assert first and question.endswith(" 👇") and channel.startswith("🏍️")
+        final = with_hashtags(m.description, m.tags, "📸 Instagram : @moi")
+        assert description_problems(final, "📸 Instagram : @moi") == []

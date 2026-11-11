@@ -121,7 +121,7 @@ French phrases until it was told to leave unclear passages out.
 | `language` | `fr` \| `en` \| `ar` \| null | `null` | Sets `defaultLanguage` and `defaultAudioLanguage`, the call-to-action lines and fallback titles, and the Whisper language. Titles, descriptions, tags and the hook are written in French (`en` for English) whatever the speech language: Arabic script is rejected. The Darija only appears in the subtitle track. |
 | `upload_captions` | bool | `true` | After each upload, add the transcript as a YouTube subtitle track (`captions.insert`, 400 units). Viewers turn it on with the CC button; you can fix the text and timing in YouTube Studio → Subtitles. The SRT is also saved in `work/subtitles/<key>.srt`. If adding it fails, the video stays online and an alert gives that file to upload by hand. |
 | `caption_language` | str \| null | `null` | Language code of the subtitle track (`ar`, `fr`...). Unset: `whisper_language`, then `language`. If none is set, no track is added. |
-| `description_signature` | str | `""` | Line added to every description at upload, above the hashtags (a link to your other profiles). |
+| `description_signature` | str | `""` | **Required.** Line added to every description at upload, above the hashtags (your Instagram). Strict rule: every upload is refused without it, and unless the description is detailed (150+ characters over two paragraphs) and ends with at least three hashtags. |
 | `caption_name` | str | `""` | Track name shown next to the language in the player, e.g. `Darija`. |
 
 ## `[schedule]`

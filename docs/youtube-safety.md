@@ -85,13 +85,24 @@ with little to no variation across videos", channel-wide. Mitigations in the cod
   Capitalized ones and collapses repeated punctuation.
 - **Cleaning**: @handles, hashtags in the text, and TikTok/Instagram/Reels mentions are
   stripped. Spam tags (`fyp`, `foryou`, `viral`, `pourtoi`...) are dropped.
-- **Varied endings**: a call-to-action line is picked per item from a list in French, English
-  or Arabic (some items get none). Without Gemini, fallback titles are composed per item from
+- **Description format** (owner, 2026-11-11: descriptions were too thin to drive views and
+  comments). Every description is built in this order: a **teaser**, the first line shown under
+  the Short in the feed (one truthful, punchy sentence, at most one emoji); the **story** in two
+  short paragraphs of factual text written from the frames; a **question** to the viewer tied to
+  the video, ending with 👇, to invite comments; the **channel line** with the call to subscribe;
+  the **signature** with the owner's Instagram (`description_signature`); and the **hashtags**,
+  alone on the last line: content tags first, then `#motovlog #bikelife`, then `#Shorts`.
+  When the model gives no teaser or question, one is picked per item from a short list. The strict
+  rule of the configuration (detailed text, signature, hashtags last) refuses any upload that
+  breaks it.
+- **Varied endings**: the question and the teaser are picked per item when the model gives
+  none, so two Shorts rarely end the same way. Without Gemini, fallback titles are composed per item from
   word pools: time of day and date from the file name or post date, a keyword from the
   transcript.
 - **Valid characters**: `<` and `>` are removed (YouTube rejects them in titles).
 - **Limits**: title ≤ 100 characters, hook ≤ 40, 15 tags and ≤ 450 tag characters.
-  `#Shorts` is appended to the description.
+  The hashtag line holds at most 10 hashtags (YouTube ignores all of them past 15), `#Shorts`
+  last.
 
 **Limits.** This lowers the template signal; it does not guarantee monetization. Variation is
 still within one caption style and one structure per mode. See the [roadmap](roadmap.md).

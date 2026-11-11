@@ -38,7 +38,8 @@ TRANSIENT_STATUS = frozenset({408, 429, 500, 502, 503, 504})  # other 4xx are ne
 UPLOAD_LIMIT = "uploadLimitExceeded"  # the channel's own limit, separate from the API quota
 QUOTA_REASONS = frozenset({"quotaExceeded", "dailyLimitExceeded", UPLOAD_LIMIT})
 MAX_TAGS_CHARS = 450  # YouTube rejects more than 500 characters of tags
-MAX_DESC_HASHTAGS = 8  # YouTube ignores every hashtag of a description that has more than 15
+MAX_DESC_HASHTAGS = 10  # YouTube ignores every hashtag of a description that has more than 15
+CORE_HASHTAGS = ("motovlog", "bikelife")  # on every Short (owner, 2026-11-11)
 MAX_RETRIES = 8
 
 
@@ -133,16 +134,70 @@ def hashtag_line(tags: Sequence[str], limit: int = MAX_DESC_HASHTAGS) -> str:
     return " ".join([*(f"#{w}" for w in words[: limit - 1]), "#Shorts"])
 
 
-def with_hashtags(description: str, tags: Sequence[str], signature: str = "") -> str:
-    """Append the channel signature, then the hashtag line (not if ``#Shorts`` is already there).
+MIN_BODY_CHARS = 150  # owner's strict rule: a detailed description, never a bare title
+MIN_HASHTAGS = 3
+_TAG = re.compile(r"#\w+")
 
+
+class DescriptionRuleError(ValueError):
+    """The description breaks the owner's strict rule: the upload is refused."""
+
+
+def description_problems(description: str, signature: str) -> list[str]:
+    """Breaches of the strict description rule (empty list = compliant).
+
+    Rule (owner, 2026-11-10, both repositories): detailed text (at least 150 characters over two
+    paragraphs), then the signature (it holds the Instagram), then a last line made only of
+    hashtags (at least three).
+    The signature comes from the configuration (``description_signature``), never from the code.
+    """
+    problems: list[str] = []
+    sig = (signature or "").strip()
+    if not sig:
+        problems.append("signature not configured (description_signature)")
+    elif "@" not in sig and "instagram" not in sig.lower():
+        problems.append("the signature must contain the owner's Instagram")
+    lines = [ln.strip() for ln in (description or "").strip().splitlines() if ln.strip()]
+    last = lines[-1] if lines else ""
+    tags = _TAG.findall(last)
+    if not tags or re.sub(r"#\w+|\s", "", last):
+        problems.append("the last line must be hashtags only")
+    elif len(tags) < MIN_HASHTAGS:
+        problems.append(f"fewer than {MIN_HASHTAGS} hashtags")
+    if sig:
+        pos = (description or "").rfind(sig)
+        if pos < 0:
+            problems.append("signature missing from the description")
+        elif last and pos > (description or "").rfind(last):
+            problems.append("the signature must come BEFORE the hashtags")
+    body = [
+        ln for ln in lines[:-1] if ln != sig and not (ln.split() and _TAG.fullmatch(ln.split()[0]))
+    ]
+    if sum(len(ln) for ln in body) < MIN_BODY_CHARS or len(body) < 2:
+        problems.append(
+            f"description too short: at least {MIN_BODY_CHARS} characters over 2 paragraphs of text"
+        )
+    return problems
+
+
+def with_hashtags(description: str, tags: Sequence[str], signature: str = "") -> str:
+    """Detailed text, then the channel signature, then the hashtag line, ALWAYS in that order.
+
+    Hashtags already closing the description are folded into the final line, so nothing ever
+    follows them.
     At upload, not in the metadata step: a render made before a signature change still gets it.
     """
-    if signature and signature not in description:
-        description = f"{description}\n\n{signature}"
-    if "#shorts" in description.lower():
-        return description
-    return f"{description}\n\n{hashtag_line(tags)}".strip()
+    lines = description.rstrip().splitlines()
+    kept: list[str] = []
+    while lines and (not lines[-1].strip() or not re.sub(r"#\w+|\s", "", lines[-1])):
+        kept = [t.lstrip("#") for t in _TAG.findall(lines[-1])] + kept
+        lines.pop()
+    # an inline #Shorts is dropped: the last line carries it (once)
+    text = re.sub(r"[ \t]*#shorts\b", "", "\n".join(lines), flags=re.IGNORECASE).rstrip()
+    if signature and signature not in text:
+        text = f"{text}\n\n{signature}"
+    merged = list(dict.fromkeys([*kept, *tags, *CORE_HASHTAGS]))
+    return f"{text}\n\n{hashtag_line(merged)}".strip()
 
 
 def _fit_tags(tags: list[str]) -> list[str]:
@@ -310,6 +365,9 @@ class YouTubeClient:
             publish_at=publish_at, made_for_kids=self.made_for_kids,
             synthetic_media=self.synthetic_media, signature=self.signature,
         )  # fmt: skip
+        problems = description_problems(body["snippet"]["description"], self.signature)
+        if problems:  # strict rule: nothing is sent to YouTube with a poor description
+            raise DescriptionRuleError("; ".join(problems))
         media = MediaFileUpload(str(path), mimetype="video/mp4", chunksize=8 << 20, resumable=True)
         request = self.service.videos().insert(part="snippet,status", body=body, media_body=media)
         return parse_upload_response(run_resumable(request, sleep=self.sleep), body)

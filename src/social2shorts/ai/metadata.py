@@ -49,29 +49,47 @@ _PLATFORM = re.compile(r"\b(tik\s?tok|instagram|insta|reels?)\b", re.I)
 
 DEFAULT_LANGUAGE = "fr"  # the audience is mostly francophone (Morocco)
 LANGUAGES = {"fr": "French", "en": "English"}
-CTAS: dict[str, list[str | None]] = {
+# Engagement question closing the text when the model gives none (owner, 2026-11-11: descriptions
+# were too thin to drive comments). The model's own question, tied to the video, is preferred.
+CTAS: dict[str, list[str]] = {
     "fr": [
-        "Tu roulerais où, toi ?",
-        "D'autres sorties arrivent, reste dans le coin.",
-        "Dis-moi ce que tu conduis en commentaire.",
-        "Roulez prudemment.",
-        "Ton meilleur spot pour rouler ? Dis-le en commentaire.",
-        None,
-        None,
+        "Tu roulerais où, toi ? Dis-le en commentaire",
+        "Ton meilleur spot pour rouler ? Partage-le en commentaire",
+        "Tu roules quoi en ce moment ? Dis-le en commentaire",
+        "Tague le pote avec qui tu ferais cette balade",
+        "Tu ferais cette route ? Réponds en commentaire",
+        "Plutôt balade tranquille ou grosse virée ? Dis-le en commentaire",
     ],
     "en": [
-        "Where would you ride this one?",
-        "More rides coming, stick around.",
-        "Tell me what bike you ride.",
-        "Ride safe out there.",
-        None,
-        None,
+        "Where would you ride this one? Tell me in the comments",
+        "Your favourite road to ride? Share it in the comments",
+        "What are you riding right now? Tell me in the comments",
+        "Tag the friend you would ride this with",
+        "Would you ride this road? Answer in the comments",
+        "Easy cruise or long ride? Tell me in the comments",
     ],
 }
 CHANNEL_LINE = {
-    "fr": "🏍️ Moto Ride Vlog : des sorties moto filmées au guidon. Abonne-toi pour ne rien rater.",
-    "en": "🏍️ Moto Ride Vlog: rides filmed from the saddle. Subscribe so you never miss one.",
+    "fr": (
+        "🏍️ Moto Ride Vlog : des sorties moto filmées au guidon, entre routes de montagne, balades "
+        "entre amis et voyages. Un nouveau Short chaque jour : abonne-toi et active la 🔔 pour ne "
+        "rien rater !"
+    ),
+    "en": (
+        "🏍️ Moto Ride Vlog: rides filmed from the saddle, mountain roads, rides with friends and "
+        "trips. A new Short every day: subscribe and turn on the 🔔 so you never miss one!"
+    ),
 }
+# First line of the description (shown under the Short in the feed) when the model gives none.
+TEASERS = {
+    "fr": ["🏍️ Une sortie à moto comme on les aime.", "🛣️ La route, la moto et rien d'autre.",
+           "🔥 Encore une balade qui fait du bien.", "🌄 Un moment de route à partager."],
+    "en": ["🏍️ A ride the way we like them.", "🛣️ The road, the bike, nothing else.",
+           "🔥 Another ride that feels good.", "🌄 A piece of road worth sharing."],
+}  # fmt: skip
+MAX_TEASER = 100
+MAX_QUESTION = 110
+_PARA = re.compile(r"\n\s*\n")
 # Fallback titles are composed from pools, so 200 clips without an LLM still read differently.
 # They say nothing about who rides, how many, the sound or the place: nobody looked at the clip.
 _TIME_RE = re.compile(r"(20\d{2})(\d{2})(\d{2})(?:[_-]?(\d{2})(\d{2}))?")
@@ -246,6 +264,18 @@ def _strip_noise(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" -|:,.")
 
 
+def _strip_noise_paragraphs(text: str) -> str:
+    """:func:`_strip_noise` paragraph by paragraph: the blank line between paragraphs and the
+    final punctuation of each sentence are kept (a description is prose, not a title)."""
+    out = []
+    for part in _PARA.split(text):
+        part = _PLATFORM.sub(" ", _HASHTAG.sub(" ", _HANDLE.sub(" ", part)))
+        part = re.sub(r"\s+", " ", part).strip(" -|:,")
+        if part:
+            out.append(part)
+    return "\n\n".join(out)
+
+
 def _clip(text: str, limit: int) -> str:
     """Cut at a word boundary to ``limit`` chars."""
     if len(text) <= limit:
@@ -271,10 +301,22 @@ def content_tags(llm_tags: Sequence[str], caption: str) -> list[str]:
     return tags[:MAX_TAGS] or ["moto"]
 
 
-def _description(body: str, key: str, language: str) -> str:
-    cta = pick(CTAS.get(language, CTAS[DEFAULT_LANGUAGE]), key, "cta")
-    channel = CHANNEL_LINE.get(language, CHANNEL_LINE[DEFAULT_LANGUAGE])
-    return "\n\n".join(part for part in (humanize(body), cta, channel) if part)
+def _paragraphs(text: str) -> str:
+    """Humanized body with its paragraph breaks kept (the model writes two short paragraphs)."""
+    return "\n\n".join(p for p in (humanize(x) for x in _PARA.split(text) if x.strip()) if p)
+
+
+def _description(body: str, key: str, language: str, teaser: str = "", question: str = "") -> str:
+    """Viral but truthful text (owner, 2026-11-11): a first line that hooks (shown under the
+    Short in the feed), the story in two short paragraphs, a question that invites comments, then
+    the channel line. The signature and the hashtags are added at upload
+    (``publish.youtube.with_hashtags``)."""
+    lang = language if language in CTAS else DEFAULT_LANGUAGE
+    teaser = _clip(humanize(teaser, max_emojis=1), MAX_TEASER) or pick(TEASERS[lang], key, "teaser")
+    question = _clip(humanize(question, max_emojis=0).rstrip(" .👇"), MAX_QUESTION)
+    question = f"{question or pick(CTAS[lang], key, 'cta')} 👇"
+    channel = CHANNEL_LINE[lang]
+    return "\n\n".join(part for part in (teaser, _paragraphs(body), question, channel) if part)
 
 
 def sanitize_meta(
@@ -291,7 +333,13 @@ def sanitize_meta(
     tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
     return ShortMeta(
         title=title,
-        description=_description(_strip_noise(str(raw.get("description", ""))), key, language),
+        description=_description(
+            _strip_noise_paragraphs(str(raw.get("description", ""))),
+            key,
+            language,
+            teaser=_strip_noise(str(raw.get("teaser") or "")),
+            question=_strip_noise(str(raw.get("question") or "")),
+        ),
         tags=content_tags(tags, caption),
         hook=_hook(raw),
     )
@@ -394,8 +442,14 @@ def build_prompt(caption: str, transcript: str, language: str | None, frames: in
         "they are.\n"
         "- Title: 70 characters at most, specific and truthful, no clickbait, no hashtag, "
         "no emoji (they make every title look the same).\n"
-        "- Description: 2 to 3 short factual sentences, no hashtag, no link, no call to "
-        "subscribe.\n"
+        '- "teaser": the FIRST line of the description, shown under the Short in the feed: one '
+        "punchy, truthful sentence that makes people stop scrolling, 90 characters at most; it "
+        "may start with ONE emoji that fits the scene.\n"
+        "- Description: 3 to 4 sentences in two short paragraphs separated by a blank line: what "
+        "happens, the place or the bike when visible, the feeling of the ride. Vivid and concrete "
+        "but strictly factual, no hashtag, no link, no call to subscribe.\n"
+        '- "question": one question to the viewer, tied to THIS video (their bike, their favourite '
+        "road, who they would ride with), that invites a comment, 90 characters at most.\n"
         "- Hook: the line burned on screen in the first seconds, 40 characters at most, "
         'describes the moment shown; null when "onscreen_text" is true.\n'
         "- Tags: up to 8, taken from what is visible or in the caption (place, bike brand, kind "
@@ -404,7 +458,7 @@ def build_prompt(caption: str, transcript: str, language: str | None, frames: in
         f"ad. Never use these words: {banned}.\n"
         'Reply ONLY with JSON: {"scene": str (one sentence: what the frames show), "riders": '
         '"solo"|"duo"|"group"|"none"|"unknown", "onscreen_text": bool, "title": str, '
-        '"description": str, "tags": [str], "hook": str|null}.\n\n'
+        '"teaser": str, "description": str, "question": str, "tags": [str], "hook": str|null}.\n\n'
         f"Caption: {caption or '(none: raw footage)'}\n"
         f"Transcript: {transcript or '(no speech)'}\n"
     )
@@ -433,15 +487,17 @@ def check_meta(raw: dict, caption: str = "") -> None:
         MetadataRejected: With the reason, worded for the model's second try.
     """
     tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
-    title, description, hook = (str(raw.get(k) or "") for k in ("title", "description", "hook"))
-    if any(_ARABIC.search(text) for text in (title, description, hook, *map(str, tags))):
+    texts = tuple(
+        str(raw.get(k) or "") for k in ("title", "description", "hook", "teaser", "question")
+    )
+    if any(_ARABIC.search(text) for text in (*texts, *map(str, tags))):
         raise MetadataRejected(
             "it contains Arabic script: write French only and translate any Arabic into French"
         )
     riders = str(raw.get("riders", "unknown")).lower()
     if riders not in _RIDERS:
         raise MetadataRejected(f'"riders" must be one of {", ".join(_RIDERS)}')
-    claims_solo = any(_SOLO.search(text) for text in (title, description, hook))
+    claims_solo = any(_SOLO.search(text) for text in texts)
     if claims_solo and not _SOLO.search(caption):
         raise MetadataRejected(
             'you wrote "solo"/"seul"/"alone": never say the rider is alone, the camera does not '

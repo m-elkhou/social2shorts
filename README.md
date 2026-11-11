@@ -29,7 +29,9 @@ Posts with licensed music wait for your approval.
 first, cuts on engine revs and scene changes, karaoke captions, smart 9:16 reframing, loop
 ending, -14 LUFS audio.
 
-**Both.** Gemini-written, humanized titles. Per-video style variation. Uploads spread over days
+**Both.** Gemini-written, humanized titles. Detailed descriptions in a fixed viral order:
+a teaser line, the story, a question for the comments, the channel line, the owner's Instagram,
+then the hashtags. Per-video style variation. Uploads spread over days
 to fit the YouTube quota, optional scheduled publishing, no duplicates, a Content-ID check after
 upload, a review queue for anything uncertain.
 
