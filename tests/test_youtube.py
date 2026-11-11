@@ -21,6 +21,16 @@ from social2shorts.publish.youtube import (
 )
 
 META = ShortMeta(title="t", description="Night ride", tags=["moto"])
+DETAILED = ShortMeta(
+    title="t",
+    description=(
+        "Une balade de nuit sur une route de montagne, filmée au guidon : les virages "
+        "s'enchaînent sous les phares et le moteur chante dans le silence.\n\nUn Short tourné "
+        "sans artifice, pour partager le plaisir de "
+        "rouler et l'ambiance d'une sortie entre passionnés. Abonne-toi pour la suite !"
+    ),
+    tags=["moto", "nuit", "balade"],
+)
 
 
 def http_error(status: int, reason: str = "", cls=HttpError) -> HttpError:
@@ -42,18 +52,20 @@ def test_description_ends_with_content_hashtags_then_shorts():
         update={"tags": ["ktm1390superadventure", "moto", "ktm", "road trip", "Moto", "lc8!"]}
     )
     last = build_body(meta, "unlisted")["snippet"]["description"].splitlines()[-1]
-    assert last == "#ktm #moto #lc8 #roadtrip #ktm1390superadventure #Shorts"
+    assert last == "#ktm #moto #lc8 #motovlog #bikelife #roadtrip #ktm1390superadventure #Shorts"
 
 
 def test_signature_sits_between_the_text_and_the_hashtags():
     meta = META.model_copy(update={"description": "Une balade.", "tags": ["moto"]})
     body = build_body(meta, "unlisted", signature="Instagram : @moi")
-    assert body["snippet"]["description"] == "Une balade.\n\nInstagram : @moi\n\n#moto #Shorts"
+    expected = "Une balade.\n\nInstagram : @moi\n\n#moto #motovlog #bikelife #Shorts"
+    assert body["snippet"]["description"] == expected
 
 
 def test_signature_is_not_doubled_and_survives_an_existing_shorts_tag():
-    assert yt.with_hashtags("x\n\nsig", ["moto"], "sig") == "x\n\nsig\n\n#moto #Shorts"
-    assert yt.with_hashtags("x #Shorts", [], "sig") == "x #Shorts\n\nsig"
+    core = "#motovlog #bikelife"  # CORE_HASHTAGS, on every Short
+    assert yt.with_hashtags("x\n\nsig", ["moto"], "sig") == f"x\n\nsig\n\n#moto {core} #Shorts"
+    assert yt.with_hashtags("x #Shorts", [], "sig") == f"x\n\nsig\n\n{core} #Shorts"  # last, once
 
 
 def test_hashtag_line_stays_under_youtube_limit():
@@ -137,9 +149,9 @@ def test_client_upload_and_set_privacy(tmp_path):
     video = tmp_path / "a.mp4"
     video.write_bytes(b"x")
     videos = Videos({"id": "VID", "status": {"privacyStatus": "unlisted"}})
-    client = yt.YouTubeClient("cs.json", "tok.json", language="fr",
+    client = yt.YouTubeClient("cs.json", "tok.json", language="fr", signature="Instagram : @moi",
                               service=SimpleNamespace(videos=lambda: videos))  # fmt: skip
-    result = client.upload(video, META, privacy="unlisted")
+    result = client.upload(video, DETAILED, privacy="unlisted")
     assert result.video_id == "VID" and result.privacy == "unlisted"
     kind, kw = videos.calls[0]
     assert kind == "insert" and kw["part"] == "snippet,status"
