@@ -1,7 +1,7 @@
 # social2shorts configuration. Any value can be overridden by an environment variable:
 # S2S_<KEY> for top-level keys, S2S_<SECTION>__<KEY> inside sections
 # (e.g. S2S_DB_PATH=..., S2S_YOUTUBE__DAILY_QUOTA_UNITS=5000).
-youtube_handle = "@motoride-mh"
+youtube_handle = "@your-channel"
 originals_dir = "originals"     # local cache of the phone originals
 work_dir = "work"               # references and renders (temporary)
 db_path = "social2shorts.sqlite"
@@ -21,8 +21,8 @@ whisper_model = "small"            # size name, or the folder of a converted mod
 # transcript_refine_model = "gemini-3-flash-preview"   # corrects the draft; sends the audio to Gemini
 
 [sources]
-tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
-instagram_profile_url = ""      # e.g. "https://www.instagram.com/motoride.mh/"
+tiktok_profile_url = "https://www.tiktok.com/@your.account"
+instagram_profile_url = ""      # e.g. "https://www.instagram.com/your.account/"
 # instagram_cookies = "cookies.txt"  # exported exported from a logged-in browser
 inbox_dir = "inbox"             # drop raw, never-published videos here
 prefer_platform = "tiktok"      # which copy to keep when a post is on both platforms

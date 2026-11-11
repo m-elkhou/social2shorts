@@ -71,12 +71,12 @@ CTAS: dict[str, list[str]] = {
 }
 CHANNEL_LINE = {
     "fr": (
-        "🏍️ Moto Ride Vlog : des sorties moto filmées au guidon, entre routes de montagne, balades "
+        "🏍️ Des sorties moto filmées au guidon, entre routes de montagne, balades "
         "entre amis et voyages. Un nouveau Short chaque jour : abonne-toi et active la 🔔 pour ne "
         "rien rater !"
     ),
     "en": (
-        "🏍️ Moto Ride Vlog: rides filmed from the saddle, mountain roads, rides with friends and "
+        "🏍️ Rides filmed from the saddle, mountain roads, rides with friends and "
         "trips. A new Short every day: subscribe and turn on the 🔔 so you never miss one!"
     ),
 }
@@ -421,7 +421,7 @@ def build_prompt(caption: str, transcript: str, language: str | None, frames: in
         else "You get no frames: say nothing about what is on screen."
     )
     return (
-        "You write the YouTube Short metadata for a motorcyclist's channel (Moto Ride Vlog). "
+        "You write the YouTube Short metadata for a motorcyclist's moto vlog channel. "
         f"{seen} You also get the owner's original caption (his own words, may be empty or in "
         "Arabic/Darija) and a machine transcript of the sound (often wrong or just music: use "
         "it only to understand the topic, never quote it).\n"

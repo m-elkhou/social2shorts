@@ -1,7 +1,7 @@
-# Design — social2shorts (motoride-mh)
+# Design — social2shorts
 
-> Repurposer les **meilleures** vidéos moto de @motoride.mh (TikTok / Instagram)
-> en **YouTube Shorts qualité pro, propres et monétisables** sur @motoride-mh.
+> Repurposer les **meilleures** vidéos moto de @<compte du propriétaire> (TikTok / Instagram)
+> en **YouTube Shorts qualité pro, propres et monétisables** sur <la chaîne YouTube du propriétaire>.
 > Statut : **design finalisé, validé par spike sur données réelles (2026-10-19)**.
 > Dossier projet : `C:\workdir\uw\scraper\insta2yorube`.
 
@@ -10,7 +10,7 @@
 ## 1. Intention & pourquoi
 L'utilisateur a un gros catalogue moto déjà produit (≥ 222 posts TikTok, mêmes
 vidéos sur Instagram) mais **rien sur YouTube**. But : **faire grandir la chaîne
-YouTube @motoride-mh** en y republiant, en **Shorts**, la *crème* du contenu,
+YouTube <la chaîne YouTube du propriétaire>** en y republiant, en **Shorts**, la *crème* du contenu,
 proprement, en qualité pro, sans **griller la monétisation**. La valeur tient à
 **la curation + la transformation**, pas au volume.
 
@@ -26,7 +26,7 @@ proprement, en qualité pro, sans **griller la monétisation**. La valeur tient 
   file d'attente.
 
 ## 3. Faits confirmés par le spike (2026-10-19)
-- **TikTok** @motoride.mh : **≥ 222 vidéos**, téléchargeables **sans login** et
+- **TikTok** @<compte du propriétaire> : **≥ 222 vidéos**, téléchargeables **sans login** et
   **sans watermark** via `yt-dlp` — mais plafonnées à **~540p** (la version HD
   n'existe qu'avec watermark). Métadonnées riches dispo : légende, vues, likes,
   date, et **`track`/`artist`** (→ détection audio fiable ; ex. vu :

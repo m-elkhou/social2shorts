@@ -19,3 +19,6 @@ htmlcov/
 site/
 *.db
 _duplicates/
+
+# Live configuration: names the channel and its accounts, never published (2026-11-11)
+config.toml

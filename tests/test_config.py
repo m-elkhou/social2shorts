@@ -48,11 +48,11 @@ target_duration_s = 25
 
 def test_legacy_flat_keys(tmp_path):
     s = load_config(_write(tmp_path, """
-tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
+tiktok_profile_url = "https://www.tiktok.com/@example.rider"
 default_privacy = "private"
 gemini_model = ""
 """))  # fmt: skip
-    assert s.sources.tiktok_profile_url.endswith("@motoride.mh")
+    assert s.sources.tiktok_profile_url.endswith("@example.rider")
     assert s.youtube.default_privacy is Privacy.private
     assert s.gemini_model == "gemini-2.5-flash"
 
