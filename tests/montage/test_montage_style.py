@@ -13,7 +13,7 @@ from social2shorts.montage.style import (
     seed_for,
 )
 
-PATHS = [f"/raw/motoride_{i:03d}.mp4" for i in range(60)]
+PATHS = [f"/raw/clip_{i:03d}.mp4" for i in range(60)]
 
 
 def test_variation_is_deterministic() -> None:

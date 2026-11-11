@@ -5,8 +5,6 @@ project for the next person (or session) is in the [handoff](handoff.md).
 
 ## Now
 
-- [ ] **Restart the continuous run** (`social2shorts run --continuous`) once it is idle: a process started before
-  2026-11-11 keeps the old generator in memory and still writes the short descriptions.
 - [ ] Check the first Shorts written by the new generator: teaser line, two paragraphs, a question, the channel
   line, the Instagram signature, hashtags last.
 
@@ -20,6 +18,9 @@ project for the next person (or session) is in the [handoff](handoff.md).
 
 ## Done
 
+- [x] The hourly scheduled task (`\py\social2shorts`) runs a fresh `uv run` from the main checkout, which was
+  updated on 2026-11-11: every run since uses the new generator.
+- [x] Channel handle, accounts and name removed from tracked files; `config.toml` git-ignored (2026-11-11).
 - [x] Strict description rule, enforced at upload: detailed text, signature with the Instagram, hashtags last
   (2026-11-10).
 - [x] Viral description format in the generator: teaser, story, question, channel line, `#motovlog #bikelife`

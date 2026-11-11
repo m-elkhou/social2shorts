@@ -157,7 +157,7 @@ Rendering knobs. The full table with explanations is on the
 ## Full example
 
 ```toml
-youtube_handle = "@motoride-mh"
+youtube_handle = "@your-channel"
 originals_dir = "originals"
 work_dir = "work"
 db_path = "social2shorts.sqlite"
@@ -173,7 +173,7 @@ whisper_model = "small"
 # transcript_refine_model = "gemini-3-flash-preview"
 
 [sources]
-tiktok_profile_url = "https://www.tiktok.com/@motoride.mh"
+tiktok_profile_url = "https://www.tiktok.com/@your.account"
 instagram_profile_url = ""
 # instagram_cookies = "cookies.txt"
 inbox_dir = "inbox"

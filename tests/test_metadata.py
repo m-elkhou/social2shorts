@@ -348,7 +348,7 @@ def test_description_hooks_tells_asks_and_presents_the_channel():
         "La forêt défile, ciel bleu.",
     ]
     assert parts[3].replace(" ?", "?") == "Tu connais les Cévennes? 👇"  # humanize() spacing
-    assert parts[4].startswith("🏍️ Moto Ride Vlog")
+    assert parts[4].startswith("🏍️ Des sorties moto")
     final = with_hashtags(d, ["cevennes"], "📸 Suis-moi sur Instagram : @moi")
     assert description_problems(final, "📸 Suis-moi sur Instagram : @moi") == []
 

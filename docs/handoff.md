@@ -23,15 +23,13 @@ Where the project stands, for whoever picks it up next. Updated 2026-11-11.
   (voice models, Whisper) fail with Windows error 1455 ("paging file too small").
 - **Quota.** A `videos.update` costs 50 units; rewriting 48 descriptions used about 2,500 of the 10,000 daily
   units, which an upload day needs too.
-- **Identity.** The repository is public and tracked files still name the channel and its accounts
-  (`config.toml`, `config.example.toml`, `docs/configuration.md`, `docs/research/original-design-fr.md`, test
-  fixtures). New code reads the signature from the configuration only; cleaning the existing files (and
-  possibly the history) is the owner's decision.
+- **Identity.** The repository is public. Since 2026-11-11 the live `config.toml` (channel handle, accounts,
+  signature with the Instagram) is git-ignored, and the example config, docs, tests and code use neutral
+  placeholders. The git **history** still holds the old texts; rewriting it is the owner's call.
 
 ## Open decisions (owner)
 
-- When to restart the continuous run so it uses the new generator.
 - Whether to rewrite the descriptions of the Shorts already public.
-- Whether to remove the channel's names from the tracked files of this public repository.
+- Whether to rewrite the git history to drop the old mentions of the channel.
 
 See the [TODO](todo.md) for the ordered list.
