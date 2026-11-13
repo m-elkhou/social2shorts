@@ -7,6 +7,9 @@ project for the next person (or session) is in the [handoff](handoff.md).
 
 - [ ] Check the first Shorts written by the new generator: teaser line, two paragraphs, a question, the channel
   line, the Instagram signature, hashtags last.
+- [ ] New montage direction (owner, 2026-11-13): trending energetic music and a narrated monologue in the owner's
+  cloned voice, like the reference Short `X__udVaBnUQ`. The work is in motoride-montage (its next-session brief);
+  this repository supplies the voice references, faster-whisper and the upload rules ([handoff](handoff.md)).
 
 ## Next
 
