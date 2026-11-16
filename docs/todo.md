@@ -5,6 +5,11 @@ project for the next person (or session) is in the [handoff](handoff.md).
 
 ## Now
 
+- [x] Rewrite every thin description of the channel (2026-11-14, 122 Shorts) and move the schedule to one video
+  an hour from 09:00 to 00:00 ([handoff](handoff.md)).
+- [ ] The queue is empty after 15 November 00:00: unblock the items waiting in the audio review and the failed
+  raw items, or nothing more gets scheduled.
+- [ ] Set the right audio language on the 105 Shorts that declare `en-US` (owner's choice of the value).
 - [ ] Check the first Shorts written by the new generator: teaser line, two paragraphs, a question, the channel
   line, the Instagram signature, hashtags last.
 - [ ] New montage direction (owner, 2026-11-13): trending energetic music and a narrated monologue in the owner's
